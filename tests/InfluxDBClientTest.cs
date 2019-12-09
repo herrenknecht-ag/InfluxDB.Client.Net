@@ -170,8 +170,8 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
             s.Stop();
             Debug.WriteLine($"Elapsed{s.ElapsedMilliseconds}");
             Assert.IsTrue(r != null, "QueryMultiSeriesMultiResultAsync returned null or invalid data");
-            var firstResult = new Dictionary<string, object>(r[0].InfluxSeries.Entries[0]);
-            var secondResult = new Dictionary<string, object>(r[1].InfluxSeries.Entries[0]);
+            var firstResult = new Dictionary<string, object>(r[0].InfluxSeries.FirstOrDefault().Entries[0]);
+            var secondResult = new Dictionary<string, object>(r[1].InfluxSeries.FirstOrDefault().Entries[0]);
 
             var valueActual = Convert.ToDouble(firstResult["Open"].ToString().Replace('.', ','));
             var valueExpected = Convert.ToDouble(((InfluxDatapoint<InfluxValueField>)points[0]).Fields["Open"].Value);

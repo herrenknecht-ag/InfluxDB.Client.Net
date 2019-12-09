@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace AdysTech.InfluxDB.Client.Net
 {
     /// <summary>
@@ -8,7 +10,7 @@ namespace AdysTech.InfluxDB.Client.Net
     {
         public int StatementID { get; set; }
 
-        public IInfluxSeries InfluxSeries { get; set; }
+        public List<IInfluxSeries> InfluxSeries { get; set; }
 
         /// <summary>
         /// True if the influx query was answered with a partial response due to e.g. exceeding a configured

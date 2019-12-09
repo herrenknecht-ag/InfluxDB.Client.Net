@@ -653,11 +653,12 @@ namespace AdysTech.InfluxDB.Client.Net
                         var influxResult = new InfluxResult();
                         influxResult.StatementID = currentResult.StatementID;
                         influxResult.Partial = currentResult.Partial;
+                        influxResult.InfluxSeries = new List<IInfluxSeries>();
 
                         foreach (var series in currentResult.Series)
-                            influxResult.InfluxSeries = GetInfluxSeries(precision, series, partialResult);
+                            influxResult.InfluxSeries.Add(GetInfluxSeries(precision, series, partialResult));
 
-                        if(influxResult.InfluxSeries.Entries.Any()) 
+                        if(influxResult.InfluxSeries.Any() && influxResult.InfluxSeries.Any(s => s.HasEntries)) 
                             multiResult.Add(influxResult);
                     }
                 });

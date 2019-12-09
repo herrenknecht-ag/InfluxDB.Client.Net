@@ -1,7 +1,12 @@
-#### Build Status
+#### Custom fork
 
-1. AppVeyor [![Build status](https://ci.appveyor.com/api/projects/status/ryj9u8dpcasu1xur?svg=true)](https://ci.appveyor.com/project/AdysTech/influxdb-client-net)
-2. Travis CI [![Build status](https://travis-ci.org/AdysTech/InfluxDB.Client.Net.svg?branch=master)](https://travis-ci.org/AdysTech/InfluxDB.Client.Net.svg?branch=master)
+This is a fork of https://github.com/AdysTech/InfluxDB.Client.Net . There's currently quite some work under development in this fork:
+- Inclusion of the "partial" flag from InfluxDB responses
+- Support of MultiQueries (returning multiple results) in one Influx request
+
+Those topics are currently under development and probably not (yet) ready for use outside of our own narrow use cases. Feel free to take a glance and copy the code or a modified version of it. No guarantee however that it will work in your case.
+
+#### Original README:
 
 **Now supports .Net Core, run same .Net code in Windows and Linux**
 

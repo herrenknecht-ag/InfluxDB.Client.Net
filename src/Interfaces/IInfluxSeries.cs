@@ -11,22 +11,22 @@ namespace AdysTech.InfluxDB.Client.Net
         /// Read only List of ExpandoObjects (in the form of dynamic) representing the entries in the query result 
         /// The objects will have columns as Peoperties with their current values
         /// </summary>
-        IReadOnlyList<dynamic> Entries { get; }
+        IList<dynamic> Entries { get; set; }
         
         /// <summary>
         /// Indicates whether this Series has any entries or not
         /// </summary>
-        bool HasEntries { get; }
+        bool HasEntries { get; set; }
 
         /// <summary>
         /// Name of the series. Usually its MeasurementName in case of select queries
         /// </summary>
-        string SeriesName { get; }
+        string SeriesName { get; set; }
 
         /// <summary>
         /// Dictionary of tags, and their respective values.
         /// </summary>
-        IReadOnlyDictionary<string, string> Tags { get; }
+        IDictionary<string, string> Tags { get; set; }
 
         /// <summary>
         /// True if the influx query was answered with a partial response due to e.g. exceeding a configured

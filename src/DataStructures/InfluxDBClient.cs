@@ -622,52 +622,45 @@ namespace AdysTech.InfluxDB.Client.Net
         }
 
         /// <summary>
-        /// Queries Influx DB and gets multiple time series data back. Ideal for fetching measurement values.
-        /// The return list is of InfluxResult, that contains multiple InfluxSeries and each element in there will have properties named after columns in series.
+        /// Queries Influx DB and gets a time series data back. Ideal for fetching measurement values.
+        /// The return list is of InfluxSeries, and each element in there will have properties named after columns in series
         /// </summary>
         /// <param name="dbName">Name of the database</param>
         /// <param name="measurementQuery">Query text, Only results with single series are supported for now</param>
         /// <param name="precision">epoch precision of the data set</param>
-        /// <returns>List of InfluxResult that contains multiple InfluxSeries.</returns>
-        /// <seealso cref="InfluxResult"/>
-        public async Task<List<InfluxResult>> QueryMultiSeriesMultiResultAsync(string dbName, string measurementQuery, string retentionPolicy = null, TimePrecision precision = TimePrecision.Nanoseconds)
+        /// <returns>List of InfluxSeriesDict</returns>
+        /// <seealso cref="InfluxSeries"/>
+        public async Task<List<IInfluxSeriesDict>> QueryMultiSeriesAsDictAsync(string dbName, string measurementQuery, string retentionPolicy = null, TimePrecision precision = TimePrecision.Nanoseconds)
         {
-            var endPoint = new Dictionary<string, string>() { { "db", dbName }, { "epoch", precisionLiterals[(int)precision] } };
+            var endPoint = new Dictionary<string, string>() { { "db", dbName }, { "q", measurementQuery }, { "epoch", precisionLiterals[(int)precision] } };
 
             if (retentionPolicy != null)
             {
                 endPoint.Add("rp", retentionPolicy);
             }
-            var response = await PostQueryAsync(endPoint, measurementQuery);
+            var response = await GetAsync(endPoint, HttpCompletionOption.ResponseHeadersRead);
 
             if (response == null) throw new ServiceUnavailableException();
             if (response.StatusCode == HttpStatusCode.OK)
             {
-                var multiResult = new List<InfluxResult>();
+                var results = new List<IInfluxSeriesDict>();
                 var rawResult = JsonConvert.DeserializeObject<InfluxResponse>(await response.Content.ReadAsStringAsync());
-                var partialResult = rawResult.Results?.Any(r => r.Partial);
+                var partialResult = rawResult.Results?.Any(r => r.Partial == true);
 
-                rawResult?.Results?.ForEach(currentResult =>
+                if (rawResult?.Results?.Count > 1)
+                    throw new ArgumentException("The query is resulting in a format, which is not supported by this method yet");
+
+                if (rawResult?.Results[0]?.Series != null)
                 {
-                    if (currentResult?.Series != null)
+                    foreach (var series in rawResult?.Results[0]?.Series)
                     {
-                        var influxResult = new InfluxResult();
-                        influxResult.StatementID = currentResult.StatementID;
-                        influxResult.Partial = currentResult.Partial;
-                        influxResult.InfluxSeries = new List<IInfluxSeries>();
-
-                        foreach (var series in currentResult.Series)
-                            influxResult.InfluxSeries.Add(GetInfluxSeries(precision, series, partialResult));
-
-                        if(influxResult.InfluxSeries.Any() && influxResult.InfluxSeries.Any(s => s.HasEntries)) 
-                            multiResult.Add(influxResult);
+                        InfluxSeriesDict result = GetInfluxSeriesDict(precision, series, partialResult);
+                        results.Add(result);
                     }
-                });
-
-                return multiResult;
+                }
+                return results;
             }
-            throw new Exception($"InfluxDB returned status code {response.StatusCode}: " +
-                                $"{await response.Content.ReadAsStringAsync()}");
+            return null;
         }
 
         /// <summary>

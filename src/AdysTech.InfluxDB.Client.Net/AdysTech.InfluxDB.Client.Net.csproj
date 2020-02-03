@@ -70,9 +70,6 @@
     <Compile Include="..\DataStructures\InfluxRetentionPolicy.cs">
       <Link>DataStructures\InfluxRetentionPolicy.cs</Link>
     </Compile>
-    <Compile Include="..\DataStructures\InfluxResult.cs">
-      <Link>DataStructures\InfluxResult.cs</Link>
-    </Compile>
     <Compile Include="..\DataStructures\InfluxResultDict.cs">
       <Link>DataStructures\InfluxResultDict.cs</Link>
     </Compile>

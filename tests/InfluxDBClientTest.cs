@@ -165,7 +165,7 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
 
             Stopwatch s = new Stopwatch();
             s.Start();
-            var r = await client.QueryMultiSeriesMultiResultAsync(dbName, $"SELECT \"Open\", \"High\" FROM {measurement} Limit 1; SELECT \"Low\" FROM {measurement} Limit 1;");
+            var r = await client.QueryMultiSeriesMultiResultAsDictAsync(dbName, $"SELECT \"Open\", \"High\" FROM {measurement} Limit 1; SELECT \"Low\" FROM {measurement} Limit 1;");
 
             s.Stop();
             Debug.WriteLine($"Elapsed{s.ElapsedMilliseconds}");
@@ -228,7 +228,7 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
             }
             Stopwatch s = new Stopwatch();
             s.Start();
-            var r = await client.QueryMultiSeriesMultiResultAsync(dbName, query.ToString());
+            var r = await client.QueryMultiSeriesMultiResultAsDictAsync(dbName, query.ToString());
 
             s.Stop();
             Debug.WriteLine($"Elapsed{s.ElapsedMilliseconds}");

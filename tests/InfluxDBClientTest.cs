@@ -928,12 +928,71 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
         /// You need to configure your test InfluxDB with a max-row-limit of 100.000 for this test to succeed!
         /// </summary>
         /// <returns></returns>
+        [TestMethod, TestCategory("Query")]
+        public async Task TestMultiSeriesDictResultTask()
+        {
+            try
+            {
+                var client = new InfluxDBClient(influxUrl, dbUName, dbpwd);
+                await client.DropMeasurementAsync(new InfluxDatabase(dbName), new InfluxMeasurement("MultiDictTest"));
+
+                var points = new List<IInfluxDatapoint>();
+
+                var today = DateTime.Now.ToShortDateString();
+                var now = DateTime.UtcNow;
+                var nowString = DateTime.Now.ToShortTimeString();
+                var measurement = "MultiDictTest";
+
+                for (int i = 0; i < 200; i++)
+                {
+                    var valMixed = new InfluxDatapoint<InfluxValueField>();
+                    valMixed.Tags.Add("TestDate", today);
+                    valMixed.Tags.Add("TestTime", nowString);
+                    valMixed.UtcTimestamp = now + TimeSpan.FromMilliseconds(i * 100);
+                    valMixed.Fields.Add("Open", new InfluxValueField(DataGen.RandomDouble()));
+                    valMixed.Fields.Add("High", new InfluxValueField(DataGen.RandomDouble()));
+                    valMixed.Fields.Add("Low", new InfluxValueField(DataGen.RandomDouble()));
+                    valMixed.Fields.Add("Close", new InfluxValueField(DataGen.RandomDouble()));
+                    valMixed.Fields.Add("Volume", new InfluxValueField(DataGen.RandomDouble()));
+
+                    valMixed.MeasurementName = measurement;
+                    valMixed.Precision = TimePrecision.Nanoseconds;
+                    points.Add(valMixed);
+                }
+
+                await client.PostPointsAsync(dbName, points, 10000);
+
+                var r = await client.QueryMultiSeriesMultiResultAsDictAsync(dbName, "SELECT Open, High FROM MultiDictTest; SELECT Open, Low FROM MultiDictTest");
+                Assert.AreEqual(r.Count, 2);
+                Assert.AreEqual(r.First().InfluxSeries.Count, 1);
+                var s = r.First().InfluxSeries.Single();
+                Assert.IsTrue(s.HasEntries);
+                Assert.AreEqual(s.Entries.Count, 200);
+                Assert.IsTrue(s.Entries.All(e => e.Keys.Count == 3));
+                Assert.IsTrue(s.Entries.All(e => e.Keys.Contains("time")));
+                Assert.IsTrue(s.Entries.All(e => e.Keys.Contains("Open")));
+                Assert.IsTrue(s.Entries.All(e => e.Keys.Contains("High")));
+                var entry = s.Entries.First();
+                Assert.IsInstanceOfType(entry["time"], typeof(DateTime));
+                Assert.IsInstanceOfType(entry["Open"], typeof(string));
+                Assert.IsInstanceOfType(entry["High"], typeof(string));
+
+            }
+            catch (Exception e)
+            {
+
+                Assert.Fail($"Unexpected exception of type {e.GetType()} caught: {e.Message}");
+                return;
+            }
+        }
+
         [TestMethod, TestCategory("Perf")]
         public async Task TestPartialResponseBecauseOfMaxRowLimit()
         {
             try
             {
                 var client = new InfluxDBClient(influxUrl, dbUName, dbpwd);
+                await client.DropMeasurementAsync(new InfluxDatabase(dbName), new InfluxMeasurement("Partialtest"));
 
                 var points = new List<IInfluxDatapoint>();
 

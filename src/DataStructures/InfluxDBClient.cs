@@ -9,6 +9,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -670,6 +671,62 @@ namespace AdysTech.InfluxDB.Client.Net
         }
 
         /// <summary>
+        /// Queries Influx DB and gets multiple time series data back. Ideal for fetching measurement values.
+        /// The return list is of InfluxResult, that contains multiple InfluxSeries and each element in there will have properties named after columns in series.
+        /// </summary>
+        /// <param name="dbName">Name of the database</param>
+        /// <param name="measurementQuery">Query text, Only results with single series are supported for now</param>
+        /// <param name="precision">epoch precision of the data set</param>
+        /// <returns>List of InfluxResult that contains multiple InfluxSeries.</returns>
+        /// <seealso cref="InfluxResult"/>
+        public async Task<List<InfluxResultDict>> QueryMultiSeriesMultiResultAsDictAsync(string dbName, string measurementQuery, string retentionPolicy = null, TimePrecision precision = TimePrecision.Nanoseconds)
+        {
+            var endPoint = new Dictionary<string, string>() { { "db", dbName }, { "epoch", precisionLiterals[(int)precision] } };
+
+            if (retentionPolicy != null)
+            {
+                endPoint.Add("rp", retentionPolicy);
+            }
+            var response = await PostQueryAsync(endPoint, measurementQuery);
+
+            if (response == null) throw new ServiceUnavailableException();
+            if (response.StatusCode != HttpStatusCode.OK)
+            {
+                throw new Exception($"InfluxDB returned status code {response.StatusCode}: " +
+                                    $"{await response.Content.ReadAsStringAsync()}");
+            }
+            var multiResult = new List<InfluxResultDict>();
+            var serializer = new JsonSerializer();
+            InfluxResponse rawResult;
+            using (var sr = new StreamReader(await response.Content.ReadAsStreamAsync()))
+                using (var rdr = new JsonTextReader(sr))
+                    rawResult = serializer.Deserialize<InfluxResponse>(rdr);
+
+            var partialResult = rawResult.Results?.Any(r => r.Partial);
+
+            rawResult?.Results?.ForEach(currentResult =>
+            {
+                if (currentResult?.Series == null) return;
+
+                var influxResult = new InfluxResultDict
+                {
+                    StatementID = currentResult.StatementID,
+                    Partial = currentResult.Partial,
+                    InfluxSeries = new List<IInfluxSeriesDict>()
+                };
+
+                foreach (var series in currentResult.Series)
+                    influxResult.InfluxSeries.Add(GetInfluxSeriesDict(precision, series, partialResult));
+
+                if (influxResult.InfluxSeries.Any() && influxResult.InfluxSeries.Any(s => s.HasEntries))
+                    multiResult.Add(influxResult);
+            });
+
+
+            return multiResult;
+        }
+
+        /// <summary>
         /// Queries Influx DB and gets a time series data back. Ideal for fetching measurement values.
         /// The return list is of InfluxSeries, and each element in there will have properties named after columns in series
         /// THis uses Chunking support from InfluxDB. It returns results in streamed batches rather than as a single response
@@ -761,6 +818,44 @@ namespace AdysTech.InfluxDB.Client.Net
                         ((IDictionary<string, object>)entry).Add(header, EpochHelper.FromEpoch(series.Values[row][col], precision));
                     else
                         ((IDictionary<string, object>)entry).Add(header, series.Values[row][col]);
+                }
+            }
+            result.Entries = entries;
+            return result;
+        }
+
+        /// <summary>
+        /// Convert the Influx Series JSON objects to InfluxSeries
+        /// </summary>
+        /// <param name="precision"></param>
+        /// <param name="series"></param>
+        /// <param name="partialResult"></param>
+        /// <returns></returns>
+        private static InfluxSeriesDict GetInfluxSeriesDict(TimePrecision precision, Series series, bool? partialResult)
+        {
+            var result = new InfluxSeriesDict
+            {
+                HasEntries = false, 
+                SeriesName = series.Name, 
+                Tags = series.Tags, 
+                Partial = partialResult ?? false
+            };
+
+            var entries = new List<Dictionary<string, object>>();
+            foreach (var row in series?.Values)
+            {
+                result.HasEntries = true;
+                var entry = new Dictionary<string, object>();
+                entries.Add(entry);
+                var i = 0;
+                foreach(var val in row)
+                {
+                    var header = series.Columns[i];
+                    if (string.Equals(header, "Time", StringComparison.OrdinalIgnoreCase))
+                        entry[header] = val.FromEpoch(precision);
+                    else
+                        entry[header] = val;
+                    i++;
                 }
             }
             result.Entries = entries;

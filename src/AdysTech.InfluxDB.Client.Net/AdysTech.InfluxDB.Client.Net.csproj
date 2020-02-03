@@ -73,8 +73,14 @@
     <Compile Include="..\DataStructures\InfluxResult.cs">
       <Link>DataStructures\InfluxResult.cs</Link>
     </Compile>
+    <Compile Include="..\DataStructures\InfluxResultDict.cs">
+      <Link>DataStructures\InfluxResultDict.cs</Link>
+    </Compile>
     <Compile Include="..\DataStructures\InfluxSeries.cs">
       <Link>DataStructures\InfluxSeries.cs</Link>
+    </Compile>
+    <Compile Include="..\DataStructures\InfluxSeriesDict.cs">
+      <Link>DataStructures\InfluxSeriesDict.cs</Link>
     </Compile>
     <Compile Include="..\DataStructures\InfluxValueField.cs">
       <Link>DataStructures\InfluxValueField.cs</Link>
@@ -114,6 +120,9 @@
     </Compile>
     <Compile Include="..\Interfaces\IInfluxSeries.cs">
       <Link>Interfaces\IInfluxSeries.cs</Link>
+    </Compile>
+    <Compile Include="..\Interfaces\IInfluxSeriesDict.cs">
+      <Link>Interfaces\IInfluxSeriesDict.cs</Link>
     </Compile>
     <Compile Include="GlobalSuppressions.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

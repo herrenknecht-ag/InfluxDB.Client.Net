@@ -136,7 +136,10 @@ namespace AdysTech.InfluxDB.Client.Net
                 var body = new StringContent($"q={WebUtility.UrlEncode(query)}", Encoding.UTF8, 
                     "application/x-www-form-urlencoded");
 
-                HttpResponseMessage response = await _client.PostAsync(builder.Uri, body);
+                var request = new HttpRequestMessage(HttpMethod.Post, builder.Uri);
+                request.Content = body;
+
+                var response = _client.SendAsync(request).Result;
 
                 if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.BadGateway || (response.StatusCode == HttpStatusCode.InternalServerError && response.ReasonPhrase == "INKApi Error")) //502 Connection refused
                         throw new UnauthorizedAccessException("InfluxDB needs authentication. Check uname, pwd parameters");

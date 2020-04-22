@@ -266,6 +266,10 @@ namespace AdysTech.InfluxDB.Client.Net
                     throw InfluxDBException.ProcessInfluxDBError(content);
                 }
             }
+            else if (response.StatusCode == HttpStatusCode.InternalServerError)
+            {
+                throw new Exception(await response.Content.ReadAsStringAsync());
+            }
             else if (response.StatusCode == HttpStatusCode.NoContent)
                 return true;
             else

@@ -232,28 +232,18 @@ namespace AdysTech.InfluxDB.Client.Net
 
                 if (content.Contains("partial write"))
                 {
-                    try
-                    {
-                        if (content.Contains("\\n"))
+                    if (content.Contains("\\n"))
                             parts = multiLinePattern.Matches(content.Substring(content.IndexOf("partial write:\\n") + 16)).ToList();
-                        else
+                    else
                             parts = oneLinePattern.Matches(content.Substring(content.IndexOf("partial write:\\n") + 16)).ToList();
 
-                        if (parts.Count == 0)
-                            throw new InfluxDBException("Partial Write", new Regex(@"\""error\"":\""(.*?)\""").Match(content).Groups[1].Value);
+                    if (parts.Count == 0)
+                        throw new InfluxDBException("Partial Write", new Regex(@"\""error\"":\""(.*?)\""").Match(content).Groups[1].Value);
 
-                        if (parts[1].Contains("\\n"))
-                            l = parts[1].Substring(0, parts[1].IndexOf("\\n")).Unescape();
-                        else
-                            l = parts[1].Unescape();
-                    }
-                    catch (InfluxDBException)
-                    {
-                        throw;
-                    }
-                    catch (Exception)
-                    {
-                    }
+                    if (parts[1].Contains("\\n"))
+                        l = parts[1].Substring(0, parts[1].IndexOf("\\n")).Unescape();
+                    else
+                        l = parts[1].Unescape();
 
                     var point = points.Where(p => p.ConvertToInfluxLineProtocol() == l).FirstOrDefault();
                     if (point != null)

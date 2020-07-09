@@ -333,8 +333,8 @@ namespace AdysTech.InfluxDB.Client.Net
 
             var dbs = await QueryMultiSeriesAsync(null, "SHOW DATABASES");
 
-            foreach (var db in dbs?.FirstOrDefault()?.Entries)
-                dbNames.Add(db?.Name);
+            foreach (IDictionary<string, object> db in dbs?.FirstOrDefault()?.Entries)
+                dbNames.Add((string)db["Name"]);
 
             return dbNames;
         }

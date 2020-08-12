@@ -304,6 +304,7 @@ namespace AdysTech.InfluxDB.Client.Net
                         Convert.ToBase64String(Encoding.UTF8.GetBytes($"{InfluxDBUserName}:{InfluxDBPassword}")));
 
                 _client.DefaultRequestHeaders.ConnectionClose = false;
+                _client.Timeout = TimeSpan.FromMinutes(60);
             }
             catch (Exception ex)
             {

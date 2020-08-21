@@ -286,13 +286,16 @@ namespace AdysTech.InfluxDB.Client.Net
         /// <param name="UserName">User name to authenticate InflexDB</param>
         /// <param name="Password">password</param>
         /// <param name="ClientHandler">HttpClientHandler which can be used to set the Web Proxy </param>
-        public InfluxDBClient(string InfluxUrl, string UserName, string Password, HttpClientHandler ClientHandler)
+        public InfluxDBClient(string InfluxUrl, string UserName, string Password, HttpClientHandler ClientHandler, TimeSpan? httpClientTimeout = null)
         {
             try
             {
                 this._influxUrl = InfluxUrl;
                 this._influxDBUserName = UserName;
                 this._influxDBPassword = Password;
+
+                if (httpClientTimeout == null)
+                    httpClientTimeout = TimeSpan.FromMinutes(60);
 
                 if (ClientHandler != null)
                     _client = new HttpClient(ClientHandler, true);
@@ -304,7 +307,7 @@ namespace AdysTech.InfluxDB.Client.Net
                         Convert.ToBase64String(Encoding.UTF8.GetBytes($"{InfluxDBUserName}:{InfluxDBPassword}")));
 
                 _client.DefaultRequestHeaders.ConnectionClose = false;
-                _client.Timeout = TimeSpan.FromMinutes(60);
+                _client.Timeout = httpClientTimeout.Value;
             }
             catch (Exception ex)
             {

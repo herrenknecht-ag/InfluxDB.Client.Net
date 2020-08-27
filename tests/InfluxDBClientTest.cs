@@ -28,7 +28,7 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
         public async Task TestGetInfluxDBNamesAsync_ServiceUnavailable()
         {
             var client = new InfluxDBClient(invalidInfluxUrl);
-            var r = await AssertEx.ThrowsAsync<ServiceUnavailableException>(() => client.GetInfluxDBNamesAsync());
+            var r = await AssertEx.ThrowsAsync<Exception>(() => client.GetInfluxDBNamesAsync());
         }
 
         [TestMethod, TestCategory("Get")]

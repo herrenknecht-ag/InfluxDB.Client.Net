@@ -119,7 +119,10 @@ namespace AdysTech.InfluxDB.Client.Net
                     e.InnerException.Message == "A connection with the server could not be established" ||
                     e.InnerException.Message.StartsWith("The remote name could not be resolved:"))
                     throw new ServiceUnavailableException();
+
+                throw;
             }
+
             return null;
         }
 
@@ -144,14 +147,15 @@ namespace AdysTech.InfluxDB.Client.Net
                 if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.BadGateway || (response.StatusCode == HttpStatusCode.InternalServerError && response.ReasonPhrase == "INKApi Error")) //502 Connection refused
                         throw new UnauthorizedAccessException("InfluxDB needs authentication. Check uname, pwd parameters");
 
-                    return response;
+                return response;
             }
             catch (HttpRequestException e)
             {
                 if (e.InnerException.Message == "Unable to connect to the remote server")
                     throw new ServiceUnavailableException();
+
+                throw;
             }
-            return null;
         }
 
         private async Task<HttpResponseMessage> PostAsync(Dictionary<string, string> EndPoint, byte[] requestContent)
@@ -191,8 +195,9 @@ namespace AdysTech.InfluxDB.Client.Net
             {
                 if (e.InnerException.Message == "Unable to connect to the remote server")
                     throw new ServiceUnavailableException();
+
+                throw;
             }
-            return null;
         }
 
         private async Task<bool> PostPointsAsync(string dbName, TimePrecision precision, string retention, IEnumerable<IInfluxDatapoint> points)

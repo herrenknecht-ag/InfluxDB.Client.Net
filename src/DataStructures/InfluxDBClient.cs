@@ -299,7 +299,7 @@ namespace AdysTech.InfluxDB.Client.Net
                 this._influxDBUserName = UserName;
                 this._influxDBPassword = Password;
 
-                if (httpClientTimeout == null)
+                if (!httpClientTimeout.HasValue)
                     httpClientTimeout = TimeSpan.FromMinutes(60);
 
                 if (ClientHandler != null)

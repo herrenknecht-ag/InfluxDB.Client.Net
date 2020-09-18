@@ -13,6 +13,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 
 namespace AdysTech.InfluxDB.Client.Net
 {
@@ -34,9 +35,11 @@ namespace AdysTech.InfluxDB.Client.Net
     /// </summary>
     public class InfluxDBClient : IInfluxDBClient, IDisposable
     {
+        private readonly ILogger<InfluxDBClient> _logger;
+
         #region fields
 
-        private readonly string[] precisionLiterals = { "_", "h", "m", "s", "ms", "u", "n" };
+        private readonly string[] precisionLiterals = {"_", "h", "m", "s", "ms", "u", "n"};
         private readonly string _influxUrl;
         private HttpClient _client;
 
@@ -92,7 +95,8 @@ namespace AdysTech.InfluxDB.Client.Net
 
         #region private methods
 
-        private async Task<HttpResponseMessage> GetAsync(Dictionary<string, string> Query, HttpCompletionOption completion = HttpCompletionOption.ResponseContentRead)
+        private async Task<HttpResponseMessage> GetAsync(Dictionary<string, string> Query,
+            HttpCompletionOption completion = HttpCompletionOption.ResponseContentRead)
         {
             var querybaseUrl = new Uri(InfluxUrl);
             var builder = new UriBuilder(querybaseUrl);
@@ -106,7 +110,10 @@ namespace AdysTech.InfluxDB.Client.Net
                 {
                     return response;
                 }
-                else if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.BadGateway || (response.StatusCode == HttpStatusCode.InternalServerError && response.ReasonPhrase == "INKApi Error")) //502 Connection refused
+                else if (response.StatusCode == HttpStatusCode.Unauthorized ||
+                         response.StatusCode == HttpStatusCode.BadGateway ||
+                         (response.StatusCode == HttpStatusCode.InternalServerError &&
+                          response.ReasonPhrase == "INKApi Error")) //502 Connection refused
                     throw new UnauthorizedAccessException("InfluxDB needs authentication. Check uname, pwd parameters");
                 else if (response.StatusCode == HttpStatusCode.BadRequest)
                 {
@@ -126,6 +133,11 @@ namespace AdysTech.InfluxDB.Client.Net
             return null;
         }
 
+        public TimeSpan GetInfluxClientTimeout()
+        {
+            return _client.Timeout;
+        }
+
         private async Task<HttpResponseMessage> PostQueryAsync(Dictionary<string, string> EndPoint, string query)
         {
             var querybaseUrl = new Uri(InfluxUrl);
@@ -136,7 +148,7 @@ namespace AdysTech.InfluxDB.Client.Net
 
             try
             {
-                var body = new StringContent($"q={WebUtility.UrlEncode(query)}", Encoding.UTF8, 
+                var body = new StringContent($"q={WebUtility.UrlEncode(query)}", Encoding.UTF8,
                     "application/x-www-form-urlencoded");
 
                 var request = new HttpRequestMessage(HttpMethod.Post, builder.Uri);
@@ -144,8 +156,11 @@ namespace AdysTech.InfluxDB.Client.Net
 
                 var response = _client.SendAsync(request).Result;
 
-                if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.BadGateway || (response.StatusCode == HttpStatusCode.InternalServerError && response.ReasonPhrase == "INKApi Error")) //502 Connection refused
-                        throw new UnauthorizedAccessException("InfluxDB needs authentication. Check uname, pwd parameters");
+                if (response.StatusCode == HttpStatusCode.Unauthorized ||
+                    response.StatusCode == HttpStatusCode.BadGateway ||
+                    (response.StatusCode == HttpStatusCode.InternalServerError &&
+                     response.ReasonPhrase == "INKApi Error")) //502 Connection refused
+                    throw new UnauthorizedAccessException("InfluxDB needs authentication. Check uname, pwd parameters");
 
                 return response;
             }
@@ -180,16 +195,20 @@ namespace AdysTech.InfluxDB.Client.Net
                         using (var byeteArrayStream = new MemoryStream(requestContent))
                             await byeteArrayStream.CopyToAsync(gZipStream);
                     }
+
                     var zippedByteArrayContent = new ByteArrayContent(outStream.ToArray());
                     zippedByteArrayContent.Headers.ContentEncoding.Add("gzip");
                     HttpResponseMessage response = await _client.PostAsync(builder.Uri, zippedByteArrayContent);
 
-                    if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.BadGateway || (response.StatusCode == HttpStatusCode.InternalServerError && response.ReasonPhrase == "INKApi Error")) //502 Connection refused
-                        throw new UnauthorizedAccessException("InfluxDB needs authentication. Check uname, pwd parameters");
+                    if (response.StatusCode == HttpStatusCode.Unauthorized ||
+                        response.StatusCode == HttpStatusCode.BadGateway ||
+                        (response.StatusCode == HttpStatusCode.InternalServerError &&
+                         response.ReasonPhrase == "INKApi Error")) //502 Connection refused
+                        throw new UnauthorizedAccessException(
+                            "InfluxDB needs authentication. Check uname, pwd parameters");
 
                     return response;
                 }
-
             }
             catch (HttpRequestException e)
             {
@@ -200,10 +219,13 @@ namespace AdysTech.InfluxDB.Client.Net
             }
         }
 
-        private async Task<bool> PostPointsAsync(string dbName, TimePrecision precision, string retention, IEnumerable<IInfluxDatapoint> points)
+        private async Task<bool> PostPointsAsync(string dbName, TimePrecision precision, string retention,
+            IEnumerable<IInfluxDatapoint> points)
         {
-            Regex multiLinePattern = new Regex(@"([\P{Cc}].*?) '([\P{Cc}].*?)':([\P{Cc}].*?)\\n", RegexOptions.Compiled, TimeSpan.FromSeconds(5));
-            Regex oneLinePattern = new Regex(@"{\""error"":""([9\P{Cc}]+) '([\P{Cc}]+)':([a-zA-Z0-9 ]+)", RegexOptions.Compiled, TimeSpan.FromSeconds(5));
+            Regex multiLinePattern = new Regex(@"([\P{Cc}].*?) '([\P{Cc}].*?)':([\P{Cc}].*?)\\n", RegexOptions.Compiled,
+                TimeSpan.FromSeconds(5));
+            Regex oneLinePattern = new Regex(@"{\""error"":""([9\P{Cc}]+) '([\P{Cc}]+)':([a-zA-Z0-9 ]+)",
+                RegexOptions.Compiled, TimeSpan.FromSeconds(5));
 
             //allocate minimum of 128 bytes per point, reducing future allocation and resize costs
             var line = new StringBuilder(points.Count() * 128);
@@ -216,16 +238,24 @@ namespace AdysTech.InfluxDB.Client.Net
             //remove last \n
             line.Remove(line.Length - 1, 1);
 
-            var endPoint = new Dictionary<string, string>() { { "db", dbName } };
+            var endPoint = new Dictionary<string, string>() {{"db", dbName}};
             if (precision > 0)
-                endPoint.Add("precision", precisionLiterals[(int)precision]);
+                endPoint.Add("precision", precisionLiterals[(int) precision]);
 
             if (!String.IsNullOrWhiteSpace(retention))
                 endPoint.Add("rp", retention);
+
+            _logger?.LogDebug("The request header is " + endPoint + " point parts are: " + points.Count());
+
             HttpResponseMessage response = await PostAsync(endPoint, Encoding.UTF8.GetBytes(line.ToString()));
             line.Clear();
 
-            if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.BadGateway || (response.StatusCode == HttpStatusCode.InternalServerError && response.ReasonPhrase == "INKApi Error")) //502 Connection refused
+            _logger?.LogDebug("The response header is " + response.Headers);
+
+            if (response.StatusCode == HttpStatusCode.Unauthorized ||
+                response.StatusCode == HttpStatusCode.BadGateway ||
+                (response.StatusCode == HttpStatusCode.InternalServerError && response.ReasonPhrase == "INKApi Error")
+            ) //502 Connection refused
                 throw new UnauthorizedAccessException("InfluxDB needs authentication. Check uname, pwd parameters");
             //if(response.StatusCode==HttpStatusCode.NotFound)
             else if (response.StatusCode == HttpStatusCode.BadRequest)
@@ -233,17 +263,21 @@ namespace AdysTech.InfluxDB.Client.Net
                 var content = await response.Content.ReadAsStringAsync();
                 //regex assumes error text from https://github.com/influxdata/influxdb/blob/master/models/points.go ParsePointsWithPrecision
                 //fmt.Sprintf("'%s': %v", string(block[start:len(block)])
-                List<string> parts = null; string l = "";
+                List<string> parts = null;
+                string l = "";
 
                 if (content.Contains("partial write"))
                 {
                     if (content.Contains("\\n"))
-                            parts = multiLinePattern.Matches(content.Substring(content.IndexOf("partial write:\\n") + 16)).ToList();
+                        parts = multiLinePattern.Matches(content.Substring(content.IndexOf("partial write:\\n") + 16))
+                            .ToList();
                     else
-                            parts = oneLinePattern.Matches(content.Substring(content.IndexOf("partial write:\\n") + 16)).ToList();
+                        parts = oneLinePattern.Matches(content.Substring(content.IndexOf("partial write:\\n") + 16))
+                            .ToList();
 
                     if (parts.Count == 0)
-                        throw new InfluxDBException("Partial Write", new Regex(@"\""error\"":\""(.*?)\""").Match(content).Groups[1].Value);
+                        throw new InfluxDBException("Partial Write",
+                            new Regex(@"\""error\"":\""(.*?)\""").Match(content).Groups[1].Value);
 
                     if (parts[1].Contains("\\n"))
                         l = parts[1].Substring(0, parts[1].IndexOf("\\n")).Unescape();
@@ -252,9 +286,11 @@ namespace AdysTech.InfluxDB.Client.Net
 
                     var point = points.Where(p => p.ConvertToInfluxLineProtocol() == l).FirstOrDefault();
                     if (point != null)
-                        throw new InfluxDBException("Partial Write", $"Partial Write : {parts?[0]} due to {parts?[2]}", point);
+                        throw new InfluxDBException("Partial Write", $"Partial Write : {parts?[0]} due to {parts?[2]}",
+                            point);
                     else
-                        throw new InfluxDBException("Partial Write", $"Partial Write : {parts?[0]} due to {parts?[2]}", l);
+                        throw new InfluxDBException("Partial Write", $"Partial Write : {parts?[0]} due to {parts?[2]}",
+                            l);
                 }
                 else
                 {
@@ -280,7 +316,7 @@ namespace AdysTech.InfluxDB.Client.Net
         /// <param name="UserName">User name to authenticate InflexDB</param>
         /// <param name="Password">password</param>
         public InfluxDBClient(string InfluxUrl, string UserName, string Password) :
-            this(InfluxUrl, UserName, Password, null)
+            this(InfluxUrl, UserName, Password, null, null, null)
         {
         }
 
@@ -291,13 +327,15 @@ namespace AdysTech.InfluxDB.Client.Net
         /// <param name="UserName">User name to authenticate InflexDB</param>
         /// <param name="Password">password</param>
         /// <param name="ClientHandler">HttpClientHandler which can be used to set the Web Proxy </param>
-        public InfluxDBClient(string InfluxUrl, string UserName, string Password, HttpClientHandler ClientHandler, TimeSpan? httpClientTimeout = null)
+        public InfluxDBClient(string InfluxUrl, string UserName, string Password, HttpClientHandler ClientHandler,
+            ILogger<InfluxDBClient> logger, TimeSpan? httpClientTimeout = null)
         {
             try
             {
                 this._influxUrl = InfluxUrl;
                 this._influxDBUserName = UserName;
                 this._influxDBPassword = Password;
+                _logger = logger;
 
                 if (!httpClientTimeout.HasValue)
                     httpClientTimeout = TimeSpan.FromMinutes(60);
@@ -327,7 +365,7 @@ namespace AdysTech.InfluxDB.Client.Net
         /// </summary>
         /// <param name="InfluxUrl">Url for the Inflex Server, e.g. localhost:8086</param>
         public InfluxDBClient(string InfluxUrl)
-                : this(InfluxUrl, null, null)
+            : this(InfluxUrl, null, null, null, null, null)
         {
         }
 
@@ -345,7 +383,7 @@ namespace AdysTech.InfluxDB.Client.Net
             var dbs = await QueryMultiSeriesAsync(null, "SHOW DATABASES");
 
             foreach (IDictionary<string, object> db in dbs?.FirstOrDefault()?.Entries)
-                dbNames.Add((string)db["Name"]);
+                dbNames.Add((string) db["Name"]);
 
             return dbNames;
         }
@@ -365,7 +403,8 @@ namespace AdysTech.InfluxDB.Client.Net
             {
                 dbStructure.MeasurementHierarchy.Add(policy, new HashSet<IInfluxMeasurement>());
 
-                var fields = await QueryMultiSeriesAsync(dbName: dbName, retentionPolicy: policy.Name, measurementQuery: "SHOW FIELD KEYS");
+                var fields = await QueryMultiSeriesAsync(dbName: dbName, retentionPolicy: policy.Name,
+                    measurementQuery: "SHOW FIELD KEYS");
                 foreach (var s in fields)
                 {
                     var measurement = new InfluxMeasurement(s.SeriesName);
@@ -375,14 +414,20 @@ namespace AdysTech.InfluxDB.Client.Net
                     foreach (var e in s.Entries)
                         measurement.Fields.Add(e.FieldKey);
 
-                    measurement.SeriesCount = (await QueryMultiSeriesAsync(dbName: dbName, retentionPolicy: policy.Name, measurementQuery: "SHOW SERIES")).FirstOrDefault().Entries?.Count() ?? -1;
+                    measurement.SeriesCount =
+                        (await QueryMultiSeriesAsync(dbName: dbName, retentionPolicy: policy.Name,
+                            measurementQuery: "SHOW SERIES")).FirstOrDefault().Entries?.Count() ?? -1;
 
-                    var points = (IDictionary<string, object>)(await QueryMultiSeriesAsync(dbName: dbName, retentionPolicy: policy.Name, measurementQuery: $"select count(*) from \"{s.SeriesName}\"")).FirstOrDefault().Entries?.FirstOrDefault();
+                    var points = (IDictionary<string, object>) (await QueryMultiSeriesAsync(dbName: dbName,
+                            retentionPolicy: policy.Name, measurementQuery: $"select count(*) from \"{s.SeriesName}\""))
+                        .FirstOrDefault().Entries?.FirstOrDefault();
                     //influx returns point counts for each of the fields. Pick the larget of them as total points in the measurement
-                    measurement.PointsCount = measurement.Fields.Select(f => int.Parse(points[$"Count_{f}"].ToString())).Max();
+                    measurement.PointsCount =
+                        measurement.Fields.Select(f => int.Parse(points[$"Count_{f}"].ToString())).Max();
                 }
 
-                var tags = await QueryMultiSeriesAsync(dbName: dbName, retentionPolicy: policy.Name, measurementQuery: "SHOW TAG KEYS");
+                var tags = await QueryMultiSeriesAsync(dbName: dbName, retentionPolicy: policy.Name,
+                    measurementQuery: "SHOW TAG KEYS");
                 foreach (var t in tags)
                 {
                     var measurement = dbStructure.Measurements.FirstOrDefault(x => x.Name == t.SeriesName);
@@ -390,6 +435,7 @@ namespace AdysTech.InfluxDB.Client.Net
                         measurement.Tags.Add(e.TagKey);
                 }
             }
+
             return dbStructure;
         }
 
@@ -402,7 +448,7 @@ namespace AdysTech.InfluxDB.Client.Net
         ///<exception cref="HttpRequestException">all other HTTP exceptions</exception>
         public async Task<bool> CreateDatabaseAsync(string dbName)
         {
-            var response = await GetAsync(new Dictionary<string, string>() { { "q", $"CREATE DATABASE \"{dbName}\"" } });
+            var response = await GetAsync(new Dictionary<string, string>() {{"q", $"CREATE DATABASE \"{dbName}\""}});
             if (response.StatusCode == HttpStatusCode.OK)
             {
                 var content = await response.Content.ReadAsStringAsync();
@@ -424,8 +470,11 @@ namespace AdysTech.InfluxDB.Client.Net
         /// <returns>true:success, false:failure</returns>
         public async Task<bool> PostRawValueAsync(string dbName, TimePrecision precision, string content)
         {
-
-            HttpResponseMessage response = await PostAsync(new Dictionary<string, string>() { { "db", dbName }, { "precision", precisionLiterals[(int)precision] } }, Encoding.UTF8.GetBytes(content));
+            HttpResponseMessage response =
+                await PostAsync(
+                    new Dictionary<string, string>()
+                        {{"db", dbName}, {"precision", precisionLiterals[(int) precision]}},
+                    Encoding.UTF8.GetBytes(content));
 
             if (response.StatusCode == HttpStatusCode.NoContent)
                 return true;
@@ -443,13 +492,15 @@ namespace AdysTech.InfluxDB.Client.Net
         ///<exception cref="HttpRequestException">all other HTTP exceptions</exception>
         public async Task<bool> PostPointAsync(string dbName, IInfluxDatapoint point)
         {
-
-            var endPoint = new Dictionary<string, string>() {
-               { "db", dbName },
-               { "precision", precisionLiterals[(int)point.Precision] }};
+            var endPoint = new Dictionary<string, string>()
+            {
+                {"db", dbName},
+                {"precision", precisionLiterals[(int) point.Precision]}
+            };
             if (!String.IsNullOrWhiteSpace(point.Retention?.Name))
                 endPoint.Add("rp", point.Retention?.Name);
-            HttpResponseMessage response = await PostAsync(endPoint, Encoding.UTF8.GetBytes(point.ConvertToInfluxLineProtocol()));
+            HttpResponseMessage response =
+                await PostAsync(endPoint, Encoding.UTF8.GetBytes(point.ConvertToInfluxLineProtocol()));
 
             if (response.StatusCode == HttpStatusCode.BadRequest)
             {
@@ -477,18 +528,24 @@ namespace AdysTech.InfluxDB.Client.Net
         /// Sets Saved property on InfluxDatapoint to true to successful points
         ///<exception cref="UnauthorizedAccessException">When Influx needs authentication, and no user name password is supplied or auth fails</exception>
         ///<exception cref="HttpRequestException">all other HTTP exceptions</exception>
-        public async Task<bool> PostPointsAsync(string dbName, IEnumerable<IInfluxDatapoint> Points, int maxBatchSize = 255)
+        public async Task<bool> PostPointsAsync(string dbName, IEnumerable<IInfluxDatapoint> Points,
+            int maxBatchSize = 255)
         {
             bool finalResult = true, result;
-            foreach (var group in Points.Where(p => p.Retention == null || p.Retention.Duration.TotalMinutes == 0 || p.UtcTimestamp > DateTime.UtcNow - p.Retention.Duration).GroupBy(p => new { p.Precision, p.Retention?.Name }))
+            foreach (var group in Points
+                .Where(p => p.Retention == null || p.Retention.Duration.TotalMinutes == 0 ||
+                            p.UtcTimestamp > DateTime.UtcNow - p.Retention.Duration)
+                .GroupBy(p => new {p.Precision, p.Retention?.Name}))
             {
-                var pointsGroup = group.AsEnumerable().Select((point, index) => new { Index = index, Point = point })//get the index of each point
-                          .GroupBy(x => x.Index / maxBatchSize) //chunk into smaller batches
-                          .Select(x => x.Select(v => v.Point)); //get the points
+                var pointsGroup = group.AsEnumerable()
+                    .Select((point, index) => new {Index = index, Point = point}) //get the index of each point
+                    .GroupBy(x => x.Index / maxBatchSize) //chunk into smaller batches
+                    .Select(x => x.Select(v => v.Point)); //get the points
                 foreach (var points in pointsGroup)
                 {
                     try
                     {
+                        _logger?.LogDebug("Group key name is: " + group.Key.Name + " point parts are: " + points.Count());
                         result = await PostPointsAsync(dbName, group.Key.Precision, group.Key.Name, points);
                     }
 #pragma warning disable CS0168 // The variable 'ex' is declared but never used
@@ -497,6 +554,7 @@ namespace AdysTech.InfluxDB.Client.Net
                     {
                         throw;
                     }
+
                     finalResult = result && finalResult;
                     if (result)
                     {
@@ -524,7 +582,10 @@ namespace AdysTech.InfluxDB.Client.Net
                 {
                     return response.Headers.GetValues("X-Influxdb-Version").FirstOrDefault();
                 }
-                else if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.BadGateway || (response.StatusCode == HttpStatusCode.InternalServerError && response.ReasonPhrase == "INKApi Error")) //502 Connection refused
+                else if (response.StatusCode == HttpStatusCode.Unauthorized ||
+                         response.StatusCode == HttpStatusCode.BadGateway ||
+                         (response.StatusCode == HttpStatusCode.InternalServerError &&
+                          response.ReasonPhrase == "INKApi Error")) //502 Connection refused
                     throw new UnauthorizedAccessException("InfluxDB needs authentication. Check uname, pwd parameters");
             }
             catch (HttpRequestException e)
@@ -532,6 +593,7 @@ namespace AdysTech.InfluxDB.Client.Net
                 if (e.InnerException.Message == "Unable to connect to the remote server")
                     throw new ServiceUnavailableException();
             }
+
             return "Unknown";
         }
 
@@ -561,9 +623,13 @@ namespace AdysTech.InfluxDB.Client.Net
                     //supported from Influx 12 onwards
                     pol.ShardDuration = StringHelper.ParseDuration(policy.ShardGroupDuration);
                 }
-                catch (Exception) { }
+                catch (Exception)
+                {
+                }
+
                 policies.Add(pol);
             }
+
             return policies;
         }
 
@@ -577,13 +643,14 @@ namespace AdysTech.InfluxDB.Client.Net
             var query = (policy as InfluxRetentionPolicy).GetCreateSyntax();
             if (query != null)
             {
-                var response = await GetAsync(new Dictionary<string, string>() { { "q", query } });
+                var response = await GetAsync(new Dictionary<string, string>() {{"q", query}});
                 if (response.StatusCode == HttpStatusCode.OK)
                 {
                     (policy as InfluxRetentionPolicy).Saved = true;
                     return true;
                 }
             }
+
             return false;
         }
 
@@ -596,25 +663,30 @@ namespace AdysTech.InfluxDB.Client.Net
         /// <param name="precision">epoch precision of the data set</param>
         /// <returns>List of InfluxSeries</returns>
         /// <seealso cref="InfluxSeries"/>
-        public async Task<List<IInfluxSeries>> QueryMultiSeriesAsync(string dbName, string measurementQuery, string retentionPolicy = null, TimePrecision precision = TimePrecision.Nanoseconds)
+        public async Task<List<IInfluxSeries>> QueryMultiSeriesAsync(string dbName, string measurementQuery,
+            string retentionPolicy = null, TimePrecision precision = TimePrecision.Nanoseconds)
         {
-            var endPoint = new Dictionary<string, string>() { { "db", dbName }, { "q", measurementQuery }, { "epoch", precisionLiterals[(int)precision] } };
+            var endPoint = new Dictionary<string, string>()
+                {{"db", dbName}, {"q", measurementQuery}, {"epoch", precisionLiterals[(int) precision]}};
 
             if (retentionPolicy != null)
             {
                 endPoint.Add("rp", retentionPolicy);
             }
+
             var response = await GetAsync(endPoint, HttpCompletionOption.ResponseHeadersRead);
 
             if (response == null) throw new ServiceUnavailableException();
             if (response.StatusCode == HttpStatusCode.OK)
             {
                 var results = new List<IInfluxSeries>();
-                var rawResult = JsonConvert.DeserializeObject<InfluxResponse>(await response.Content.ReadAsStringAsync());
+                var rawResult =
+                    JsonConvert.DeserializeObject<InfluxResponse>(await response.Content.ReadAsStringAsync());
                 var partialResult = rawResult.Results?.Any(r => r.Partial == true);
 
                 if (rawResult?.Results?.Count > 1)
-                    throw new ArgumentException("The query is resulting in a format, which is not supported by this method yet");
+                    throw new ArgumentException(
+                        "The query is resulting in a format, which is not supported by this method yet");
 
                 if (rawResult?.Results[0]?.Series != null)
                 {
@@ -624,8 +696,10 @@ namespace AdysTech.InfluxDB.Client.Net
                         results.Add(result);
                     }
                 }
+
                 return results;
             }
+
             return null;
         }
 
@@ -638,25 +712,30 @@ namespace AdysTech.InfluxDB.Client.Net
         /// <param name="precision">epoch precision of the data set</param>
         /// <returns>List of InfluxSeriesDict</returns>
         /// <seealso cref="InfluxSeries"/>
-        public async Task<List<IInfluxSeriesDict>> QueryMultiSeriesAsDictAsync(string dbName, string measurementQuery, string retentionPolicy = null, TimePrecision precision = TimePrecision.Nanoseconds)
+        public async Task<List<IInfluxSeriesDict>> QueryMultiSeriesAsDictAsync(string dbName, string measurementQuery,
+            string retentionPolicy = null, TimePrecision precision = TimePrecision.Nanoseconds)
         {
-            var endPoint = new Dictionary<string, string>() { { "db", dbName }, { "q", measurementQuery }, { "epoch", precisionLiterals[(int)precision] } };
+            var endPoint = new Dictionary<string, string>()
+                {{"db", dbName}, {"q", measurementQuery}, {"epoch", precisionLiterals[(int) precision]}};
 
             if (retentionPolicy != null)
             {
                 endPoint.Add("rp", retentionPolicy);
             }
+
             var response = await GetAsync(endPoint, HttpCompletionOption.ResponseHeadersRead);
 
             if (response == null) throw new ServiceUnavailableException();
             if (response.StatusCode == HttpStatusCode.OK)
             {
                 var results = new List<IInfluxSeriesDict>();
-                var rawResult = JsonConvert.DeserializeObject<InfluxResponse>(await response.Content.ReadAsStringAsync());
+                var rawResult =
+                    JsonConvert.DeserializeObject<InfluxResponse>(await response.Content.ReadAsStringAsync());
                 var partialResult = rawResult.Results?.Any(r => r.Partial == true);
 
                 if (rawResult?.Results?.Count > 1)
-                    throw new ArgumentException("The query is resulting in a format, which is not supported by this method yet");
+                    throw new ArgumentException(
+                        "The query is resulting in a format, which is not supported by this method yet");
 
                 if (rawResult?.Results[0]?.Series != null)
                 {
@@ -666,8 +745,10 @@ namespace AdysTech.InfluxDB.Client.Net
                         results.Add(result);
                     }
                 }
+
                 return results;
             }
+
             return null;
         }
 
@@ -680,14 +761,17 @@ namespace AdysTech.InfluxDB.Client.Net
         /// <param name="precision">epoch precision of the data set</param>
         /// <returns>List of InfluxResult that contains multiple InfluxSeries.</returns>
         /// <seealso cref="InfluxResult"/>
-        public async Task<List<InfluxResultDict>> QueryMultiSeriesMultiResultAsDictAsync(string dbName, string measurementQuery, string retentionPolicy = null, TimePrecision precision = TimePrecision.Nanoseconds)
+        public async Task<List<InfluxResultDict>> QueryMultiSeriesMultiResultAsDictAsync(string dbName,
+            string measurementQuery, string retentionPolicy = null, TimePrecision precision = TimePrecision.Nanoseconds)
         {
-            var endPoint = new Dictionary<string, string>() { { "db", dbName }, { "epoch", precisionLiterals[(int)precision] } };
+            var endPoint = new Dictionary<string, string>()
+                {{"db", dbName}, {"epoch", precisionLiterals[(int) precision]}};
 
             if (retentionPolicy != null)
             {
                 endPoint.Add("rp", retentionPolicy);
             }
+
             var response = await PostQueryAsync(endPoint, measurementQuery);
 
             if (response == null) throw new ServiceUnavailableException();
@@ -696,12 +780,13 @@ namespace AdysTech.InfluxDB.Client.Net
                 throw new Exception($"InfluxDB returned status code {response.StatusCode}: " +
                                     $"{await response.Content.ReadAsStringAsync()}");
             }
+
             var multiResult = new List<InfluxResultDict>();
             var serializer = new JsonSerializer();
             InfluxResponse rawResult;
             using (var sr = new StreamReader(await response.Content.ReadAsStreamAsync()))
-                using (var rdr = new JsonTextReader(sr))
-                    rawResult = serializer.Deserialize<InfluxResponse>(rdr);
+            using (var rdr = new JsonTextReader(sr))
+                rawResult = serializer.Deserialize<InfluxResponse>(rdr);
 
             var partialResult = rawResult.Results?.Any(r => r.Partial);
 
@@ -739,18 +824,22 @@ namespace AdysTech.InfluxDB.Client.Net
         /// <param name="precision">epoch precision of the data set</param>
         /// <returns>List of InfluxSeries</returns>
         /// <seealso cref="InfluxSeries"/>
-        public async Task<List<IInfluxSeries>> QueryMultiSeriesAsync(string dbName, string measurementQuery, int ChunkSize, string retentionPolicy = null, TimePrecision precision = TimePrecision.Nanoseconds)
+        public async Task<List<IInfluxSeries>> QueryMultiSeriesAsync(string dbName, string measurementQuery,
+            int ChunkSize, string retentionPolicy = null, TimePrecision precision = TimePrecision.Nanoseconds)
         {
-            var endPoint = new Dictionary<string, string>() {
-                { "db", dbName },
-                { "q", measurementQuery },
-                {"chunked", "true" },
-                {"chunk_size", ChunkSize.ToString() },
-                { "epoch", precisionLiterals[(int)precision] } };
+            var endPoint = new Dictionary<string, string>()
+            {
+                {"db", dbName},
+                {"q", measurementQuery},
+                {"chunked", "true"},
+                {"chunk_size", ChunkSize.ToString()},
+                {"epoch", precisionLiterals[(int) precision]}
+            };
             if (retentionPolicy != null)
             {
                 endPoint.Add("rp", retentionPolicy);
             }
+
             var response = await GetAsync(endPoint, HttpCompletionOption.ResponseHeadersRead);
             if (response == null) throw new ServiceUnavailableException();
             if (response.StatusCode == HttpStatusCode.OK)
@@ -774,11 +863,14 @@ namespace AdysTech.InfluxDB.Client.Net
                                 results.Add(result);
                             }
                         }
+
                         if (!rawResult.Results[0].Partial) break;
                     } while (!reader.EndOfStream);
                 }
+
                 return results;
             }
+
             return null;
         }
 
@@ -790,7 +882,7 @@ namespace AdysTech.InfluxDB.Client.Net
         /// <param name="partialResult"></param>
         /// <param name="SafePropertyNames">If true the first letter of each property name will be Capital, making them safer to use in C#</param>
         /// <returns></returns>
-        private static InfluxSeries GetInfluxSeries(TimePrecision precision, Series series, bool? partialResult, 
+        private static InfluxSeries GetInfluxSeries(TimePrecision precision, Series series, bool? partialResult,
             bool SafePropertyNames = true)
         {
             var result = new InfluxSeries()
@@ -816,11 +908,13 @@ namespace AdysTech.InfluxDB.Client.Net
                     else
                         header = series.Columns[col];
                     if (String.Equals(header, "Time", StringComparison.OrdinalIgnoreCase))
-                        ((IDictionary<string, object>)entry).Add(header, EpochHelper.FromEpoch(series.Values[row][col], precision));
+                        ((IDictionary<string, object>) entry).Add(header,
+                            EpochHelper.FromEpoch(series.Values[row][col], precision));
                     else
-                        ((IDictionary<string, object>)entry).Add(header, series.Values[row][col]);
+                        ((IDictionary<string, object>) entry).Add(header, series.Values[row][col]);
                 }
             }
+
             result.Entries = entries;
             return result;
         }
@@ -836,9 +930,9 @@ namespace AdysTech.InfluxDB.Client.Net
         {
             var result = new InfluxSeriesDict
             {
-                HasEntries = false, 
-                SeriesName = series.Name, 
-                Tags = series.Tags, 
+                HasEntries = false,
+                SeriesName = series.Name,
+                Tags = series.Tags,
                 Partial = partialResult ?? false
             };
 
@@ -849,7 +943,7 @@ namespace AdysTech.InfluxDB.Client.Net
                 var entry = new Dictionary<string, object>();
                 entries.Add(entry);
                 var i = 0;
-                foreach(var val in row)
+                foreach (var val in row)
                 {
                     var header = series.Columns[i];
                     if (string.Equals(header, "Time", StringComparison.OrdinalIgnoreCase))
@@ -859,6 +953,7 @@ namespace AdysTech.InfluxDB.Client.Net
                     i++;
                 }
             }
+
             result.Entries = entries;
             return result;
         }
@@ -869,7 +964,10 @@ namespace AdysTech.InfluxDB.Client.Net
         /// <returns>List of InfluxContinuousQuery objects</returns>
         public async Task<List<IInfluxContinuousQuery>> GetContinuousQueriesAsync()
         {
-            var cqPattern = new Regex(@"^CREATE CONTINUOUS QUERY (\S*) ON (\S*) (RESAMPLE (EVERY (\d\S)*)? ?(FOR (\d\S)*)?)? ?BEGIN ([\s\S]*GROUP BY time\((\d\S)\)[\s\S]*) END", RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromSeconds(10));
+            var cqPattern =
+                new Regex(
+                    @"^CREATE CONTINUOUS QUERY (\S*) ON (\S*) (RESAMPLE (EVERY (\d\S)*)? ?(FOR (\d\S)*)?)? ?BEGIN ([\s\S]*GROUP BY time\((\d\S)\)[\s\S]*) END",
+                    RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromSeconds(10));
             //Show Continous Queries runs at a global scope, not just for a given DB.
             var rawCQList = await QueryMultiSeriesAsync(null, "SHOW CONTINUOUS QUERIES");
             var queries = new List<IInfluxContinuousQuery>();
@@ -899,12 +997,14 @@ namespace AdysTech.InfluxDB.Client.Net
                     {
                         string query = rawCQ.Query.ToString();
                         var begin = query.IndexOf("BEGIN", StringComparison.CurrentCultureIgnoreCase) + 5;
-                        cq.Query = query.Substring(begin, query.IndexOf(" END", StringComparison.CurrentCultureIgnoreCase));
+                        cq.Query = query.Substring(begin,
+                            query.IndexOf(" END", StringComparison.CurrentCultureIgnoreCase));
                     }
 
                     queries.Add(cq);
                 }
             }
+
             return queries;
         }
 
@@ -918,13 +1018,14 @@ namespace AdysTech.InfluxDB.Client.Net
             var query = (cq as InfluxContinuousQuery).GetCreateSyntax();
             if (query != null)
             {
-                var response = await GetAsync(new Dictionary<string, string>() { { "q", query } });
+                var response = await GetAsync(new Dictionary<string, string>() {{"q", query}});
                 if (response.StatusCode == HttpStatusCode.OK)
                 {
                     (cq as InfluxContinuousQuery).Saved = true;
                     return true;
                 }
             }
+
             return false;
         }
 
@@ -940,7 +1041,7 @@ namespace AdysTech.InfluxDB.Client.Net
             var query = (cq as InfluxContinuousQuery).GetDropSyntax();
             if (query != null)
             {
-                var response = await GetAsync(new Dictionary<string, string>() { { "q", query } });
+                var response = await GetAsync(new Dictionary<string, string>() {{"q", query}});
                 if (response.StatusCode == HttpStatusCode.OK)
                 {
                     (cq as InfluxContinuousQuery).Saved = false;
@@ -948,6 +1049,7 @@ namespace AdysTech.InfluxDB.Client.Net
                     return true;
                 }
             }
+
             return false;
         }
 
@@ -961,13 +1063,14 @@ namespace AdysTech.InfluxDB.Client.Net
             var query = (db as InfluxDatabase).GetDropSyntax();
             if (query != null)
             {
-                var response = await GetAsync(new Dictionary<string, string>() { { "q", query } });
+                var response = await GetAsync(new Dictionary<string, string>() {{"q", query}});
                 if (response.StatusCode == HttpStatusCode.OK)
                 {
                     (db as InfluxDatabase).Deleted = true;
                     return true;
                 }
             }
+
             return false;
         }
 
@@ -977,28 +1080,33 @@ namespace AdysTech.InfluxDB.Client.Net
         /// <param name="im">An instance of IInfluxMeasurement</param>
         /// <param name="rp">An instance of IInfluxRetentionPolicy, optional</param>
         /// <returns>True: Success</returns>
-        public async Task<bool> DropMeasurementAsync(IInfluxDatabase db, IInfluxMeasurement im, IInfluxRetentionPolicy rp = null)
+        public async Task<bool> DropMeasurementAsync(IInfluxDatabase db, IInfluxMeasurement im,
+            IInfluxRetentionPolicy rp = null)
         {
             var query = (im as InfluxMeasurement).GetDropSyntax();
             if (query != null)
             {
-                var endPoint = new Dictionary<string, string>() { { "db", db.Name },{ "q", query } };
+                var endPoint = new Dictionary<string, string>() {{"db", db.Name}, {"q", query}};
                 if (rp != null)
                 {
                     endPoint.Add("rp", rp.Name);
                 }
+
                 var response = await GetAsync(endPoint);
                 if (response.StatusCode == HttpStatusCode.OK)
                 {
                     var content = await response.Content.ReadAsStringAsync();
                     if (content.Contains("error"))
                     {
-                        throw new InfluxDBException("Drop Failed", new Regex(@"\""error\"":\""(.*?)\""").Match(content).Groups[1].Value);
+                        throw new InfluxDBException("Drop Failed",
+                            new Regex(@"\""error\"":\""(.*?)\""").Match(content).Groups[1].Value);
                     }
+
                     (im as InfluxMeasurement).Deleted = true;
                     return true;
                 }
             }
+
             return false;
         }
 
@@ -1010,27 +1118,32 @@ namespace AdysTech.InfluxDB.Client.Net
         /// <param name="rp">An instance of IInfluxRetentionPolicy, optional</param>
         /// <param name="whereClause"> key value pair defining the where clause to restrict deletion</param>
         /// <returns>True: Success</returns>
-        public async Task<bool> DeletePointsAsync(IInfluxDatabase db, IInfluxMeasurement im, IInfluxRetentionPolicy rp = null, IList<string> whereClause = null)
+        public async Task<bool> DeletePointsAsync(IInfluxDatabase db, IInfluxMeasurement im,
+            IInfluxRetentionPolicy rp = null, IList<string> whereClause = null)
         {
             var query = (im as InfluxMeasurement).GetDeleteSyntax(rp, whereClause);
             if (query != null)
             {
-                var endPoint = new Dictionary<string, string>() { { "db", db.Name }, { "q", query } };
+                var endPoint = new Dictionary<string, string>() {{"db", db.Name}, {"q", query}};
                 if (rp != null)
                 {
                     endPoint.Add("rp", rp.Name);
                 }
+
                 var response = await GetAsync(endPoint);
                 if (response.StatusCode == HttpStatusCode.OK)
                 {
                     var content = await response.Content.ReadAsStringAsync();
-                    if(content.Contains("error"))
+                    if (content.Contains("error"))
                     {
-                        throw new InfluxDBException("Delete Failed", new Regex(@"\""error\"":\""(.*?)\""").Match(content).Groups[1].Value);
+                        throw new InfluxDBException("Delete Failed",
+                            new Regex(@"\""error\"":\""(.*?)\""").Match(content).Groups[1].Value);
                     }
+
                     return true;
                 }
             }
+
             return false;
         }
 

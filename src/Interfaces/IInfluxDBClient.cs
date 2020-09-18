@@ -166,5 +166,11 @@ namespace AdysTech.InfluxDB.Client.Net
         /// <param name="whereClause"> key value pair defining the where clause to restrict deletion</param>
         /// <returns>True: Success</returns>
         Task<bool> DeletePointsAsync(IInfluxDatabase db, IInfluxMeasurement im, IInfluxRetentionPolicy rp = null, IList<string> whereClause = null);
+
+        /// <summary>
+        /// Get influx client library timeout.
+        /// </summary>
+        /// <returns>The configured timeout for the client library.</returns>
+        TimeSpan GetInfluxClientTimeout();
     }
 }

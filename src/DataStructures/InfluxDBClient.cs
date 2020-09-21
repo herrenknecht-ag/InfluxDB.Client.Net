@@ -198,7 +198,20 @@ namespace AdysTech.InfluxDB.Client.Net
 
                     var zippedByteArrayContent = new ByteArrayContent(outStream.ToArray());
                     zippedByteArrayContent.Headers.ContentEncoding.Add("gzip");
+                    _logger.LogDebug("------------- HTTP Request Header ----------------");
+                    foreach (var httpContentHeader in zippedByteArrayContent.Headers)
+                    {
+                        _logger.LogDebug("Key: " + httpContentHeader.Key + ", Value: " + httpContentHeader.Value);
+                    }
+                    _logger.LogDebug("------------- HTTP Request Header end ----------------");
                     HttpResponseMessage response = await _client.PostAsync(builder.Uri, zippedByteArrayContent);
+
+                    _logger.LogDebug("------------- HTTP Response Header ----------------");
+                    foreach (var httpResponseHeader in response.Headers)
+                    {
+                        _logger.LogDebug("Key: " + httpResponseHeader.Key + ", Value: " + httpResponseHeader.Value);
+                    }
+                    _logger.LogDebug("------------- HTTP Response Header end ----------------");
 
                     if (response.StatusCode == HttpStatusCode.Unauthorized ||
                         response.StatusCode == HttpStatusCode.BadGateway ||

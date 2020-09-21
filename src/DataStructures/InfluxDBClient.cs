@@ -198,20 +198,19 @@ namespace AdysTech.InfluxDB.Client.Net
 
                     var zippedByteArrayContent = new ByteArrayContent(outStream.ToArray());
                     zippedByteArrayContent.Headers.ContentEncoding.Add("gzip");
-                    _logger.LogDebug("------------- HTTP Request Header ----------------");
+
+                    _logger?.LogDebug("------------- HTTP Request Header ----------------");
                     foreach (var httpContentHeader in zippedByteArrayContent.Headers)
-                    {
-                        _logger.LogDebug("Key: " + httpContentHeader.Key + ", Value: " + httpContentHeader.Value);
-                    }
-                    _logger.LogDebug("------------- HTTP Request Header end ----------------");
+                        _logger?.LogDebug("Key: " + httpContentHeader.Key + ", Value: " + httpContentHeader.Value);
+                    _logger?.LogDebug("------------- HTTP Request Header end ----------------");
+
                     HttpResponseMessage response = await _client.PostAsync(builder.Uri, zippedByteArrayContent);
 
-                    _logger.LogDebug("------------- HTTP Response Header ----------------");
+                    _logger?.LogDebug("------------- HTTP Response Header ----------------");
+                    _logger?.LogDebug("Status code: " + response.StatusCode);
                     foreach (var httpResponseHeader in response.Headers)
-                    {
-                        _logger.LogDebug("Key: " + httpResponseHeader.Key + ", Value: " + httpResponseHeader.Value);
-                    }
-                    _logger.LogDebug("------------- HTTP Response Header end ----------------");
+                        _logger?.LogDebug("Key: " + httpResponseHeader.Key + ", Value: " + httpResponseHeader.Value);
+                    _logger?.LogDebug("------------- HTTP Response Header end ----------------");
 
                     if (response.StatusCode == HttpStatusCode.Unauthorized ||
                         response.StatusCode == HttpStatusCode.BadGateway ||
@@ -258,7 +257,9 @@ namespace AdysTech.InfluxDB.Client.Net
             if (!String.IsNullOrWhiteSpace(retention))
                 endPoint.Add("rp", retention);
 
-            _logger?.LogDebug("The request header is " + endPoint + " point parts are: " + points.Count());
+            _logger?.LogDebug("Function PostPointsAsync has " + points.Count() + " points.");
+            foreach (var endPointValues in endPoint)
+                _logger?.LogDebug("FormUrlEncodedContent part key: " + endPointValues.Key + " and value: " + endPointValues.Value);
 
             HttpResponseMessage response = await PostAsync(endPoint, Encoding.UTF8.GetBytes(line.ToString()));
             line.Clear();

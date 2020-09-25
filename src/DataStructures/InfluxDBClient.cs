@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Dynamic;
+using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -431,7 +432,7 @@ namespace AdysTech.InfluxDB.Client.Net
             {
                 var converter = TypeDescriptor.GetConverter(prop.PropertyType);
                 var tagName = (Enumerable.First(prop.GetCustomAttributes(typeof(InfluxDBTag), true)) as InfluxDBTag)?.Name;
-                prop.SetValue(instance, converter.ConvertFrom(dict[tagName ?? ""].ToString()));
+                prop.SetValue(instance, converter.ConvertFrom(null, CultureInfo.InvariantCulture, dict[tagName ?? ""].ToString()));
             }
 
             foreach (var prop in typeof(T)
@@ -442,7 +443,7 @@ namespace AdysTech.InfluxDB.Client.Net
             {
                 var converter = TypeDescriptor.GetConverter(prop.PropertyType);
                 var fieldName = (Enumerable.First(prop.GetCustomAttributes(typeof(InfluxDBField), true)) as InfluxDBField)?.Name;
-                prop.SetValue(instance, converter.ConvertFrom(dict[fieldName ?? ""].ToString()));
+                prop.SetValue(instance, converter.ConvertFrom(null, CultureInfo.InvariantCulture, dict[fieldName ?? ""].ToString()));
             }
 
             return instance;

@@ -1,5 +1,7 @@
 #### Custom fork
 
+**Please refer to the original repository at** https://github.com/AdysTech/InfluxDB.Client.Net **to get a tested and stable version of this library!*** 
+
 This is a fork of https://github.com/AdysTech/InfluxDB.Client.Net . There's currently quite some work under development in this fork:
 - Inclusion of the "partial" flag from InfluxDB responses
 - Support of MultiQueries (returning multiple results) in one Influx request

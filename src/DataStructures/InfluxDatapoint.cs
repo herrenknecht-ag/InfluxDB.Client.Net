@@ -22,13 +22,13 @@ namespace AdysTech.InfluxDB.Client.Net
         /// <summary>
         /// Dictionary storing all Tag/Value combinations
         /// </summary>
-        public Dictionary<string, string> Tags { get; private set; }
+        public Dictionary<string, string> Tags { get; internal set; }
 
         /// <summary>
         /// The key-value pair in InfluxDB’s data structure that records metadata and the actual data value.
         /// Fields are required in InfluxDB’s data structure and they are not indexed.
         /// </summary>
-        public Dictionary<string, T> Fields { get; private set; }
+        public Dictionary<string, T> Fields { get; internal set; }
 
         /// <summary>
         /// Timestamp for the point, will be converted to Epoch, expcted to be in UTC
@@ -179,7 +179,7 @@ namespace AdysTech.InfluxDB.Client.Net
                 //double has to have a . as decimal seperator for Influx
                 Fields.ToList().ForEach(v =>
                 {
-                    line.AppendFormat("{0}={1},", v.Key.EscapeChars(comma: true, equalSign: true, space: true), String.Format(new CultureInfo("en-US"), "{0}", v.Value));
+                    line.AppendFormat("{0}={1},", v.Key.EscapeChars(comma: true, equalSign: true, space: true), String.Format(CultureInfo.GetCultureInfo("en-US"), "{0}", v.Value));
                 });
                 line.Remove(line.Length - 1, 1);
             }

@@ -43,7 +43,7 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
                 s.Stop();
                 Debug.WriteLine(s.ElapsedMilliseconds);
 
-                Assert.IsTrue(r != null, "GetInfluxDBNamesAsync retunred null or empty collection");
+                Assert.IsTrue(r != null, "GetInfluxDBNamesAsync returned null or empty collection");
             }
 
             catch (Exception e)
@@ -67,7 +67,7 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
             {
                 var client = new InfluxDBClient(influxUrl, dbUName, dbpwd);
                 var r = await client.CreateDatabaseAsync(dbName);
-                Assert.IsTrue(r, "CreateDatabaseAsync retunred false");
+                Assert.IsTrue(r, "CreateDatabaseAsync returned false");
             }
             catch (InvalidOperationException e)
             {
@@ -87,7 +87,7 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
             {
                 var client = new InfluxDBClient(influxUrl, dbUName, dbpwd);
                 var r = await client.GetInfluxDBStructureAsync("InvalidDB");
-                Assert.IsTrue(r != null && r.Measurements.Count() == 0, "GetInfluxDBStructureAsync retunred non null or non empty collection");
+                Assert.IsTrue(r != null && r.Measurements.Count() == 0, "GetInfluxDBStructureAsync returned non null or non empty collection");
             }
             catch (Exception e)
             {
@@ -107,7 +107,7 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
                 var r = await client.GetInfluxDBStructureAsync(dbName);
                 s.Stop();
                 Debug.WriteLine(s.ElapsedMilliseconds);
-                Assert.IsTrue(r != null && r.Measurements.Count >= 0, "GetInfluxDBStructureAsync retunred null or non empty collection");
+                Assert.IsTrue(r != null && r.Measurements.Count >= 0, "GetInfluxDBStructureAsync returned null or non empty collection");
             }
             catch (Exception e)
             {
@@ -128,10 +128,58 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
 
             s.Stop();
             Debug.WriteLine($"Elapsed{s.ElapsedMilliseconds}");
-            Assert.IsTrue(r != null, "QueryMultiSeriesAsync retunred null or invalid data");
+            Assert.IsTrue(r != null, "QueryMultiSeriesAsync returned null or invalid data");
         }
 
         [TestMethod, TestCategory("Query")]
+        public async Task TestQueryMultiSeriesAsync_ToObject()
+        {
+            var client = new InfluxDBClient(influxUrl, dbUName, dbpwd);
+
+            var tagId = DataGen.RandomString();
+
+            var points = Enumerable.Range(0, 3).Select(i =>
+                new PointObjectWithStringRetention
+                {
+                    Time = DateTime.UtcNow,
+                    Measurement = measurementName,
+                    Precision = TimePrecision.Nanoseconds,
+                    StringTag = tagId,
+                    IntTag = i,
+                    StringField = DataGen.RandomString(),
+                    DoubleField = DataGen.RandomDouble(),
+                    IntField = DataGen.RandomInt(),
+                    BoolField = i % 2 == 0,
+                }
+            ).ToList();
+
+            var postResult = await client.PostPointsAsync(dbName, points);
+
+            Assert.IsTrue(postResult, "PostPointsAsync returned false");
+
+            Stopwatch s = new Stopwatch();
+            s.Start();
+            var queryResult = await client.QueryMultiSeriesAsync<PointObjectWithStringRetention>(dbName, $"SELECT * from {measurementName} WHERE StringTag='{tagId}'");
+
+            s.Stop();
+            Debug.WriteLine($"Elapsed {s.ElapsedMilliseconds}ms");
+
+            Assert.IsTrue(queryResult != null, "QueryMultiSeriesAsync returned null or invalid data");
+            Assert.IsTrue(queryResult.Count == 1, "QueryMultiSeriesAsync returned invalid number of series");
+            foreach (var point in points)
+            {
+                var matching = queryResult[0].Entries.FirstOrDefault(e => e.IntTag == point.IntTag);
+
+                Assert.IsTrue(matching != null, $"Missing record corresponding to record {point.IntTag}");
+
+                Assert.IsTrue(matching.StringField == point.StringField, $"Mismatching string field on record {point.IntTag}");
+                Assert.IsTrue(Math.Abs(matching.DoubleField - point.DoubleField) < .0000001, $"Mismatching double field on record {point.IntTag}");
+                Assert.IsTrue(matching.IntField == point.IntField, $"Mismatching int field on record {point.IntTag}");
+                Assert.IsTrue(matching.BoolField == point.BoolField, $"Mismatching bool field on record {point.IntTag}");
+            }
+        }
+
+                [TestMethod, TestCategory("Query")]
         public async Task TestQueryMultiSeriesMultiResultAsync()
         {
             var measurement = "QueryMultiSeriesMultiTest";
@@ -235,7 +283,6 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
             Assert.IsTrue(r != null, "QueryMultiSeriesMultiResultAsync returned null or invalid data");
         }
 
-
         [TestMethod, TestCategory("Post")]
         public async Task TestPostPointsAsync()
         {
@@ -308,13 +355,46 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
 
 
                 var r = await client.PostPointsAsync(dbName, points);
-                Assert.IsTrue(r, "PostPointsAsync retunred false");
+                Assert.IsTrue(r, "PostPointsAsync returned false");
             }
             catch (Exception e)
             {
 
                 Assert.Fail($"Unexpected exception of type {e.GetType()} caught: {e.Message}");
                 return;
+            }
+        }
+
+        [TestMethod, TestCategory("Post")]
+        public async Task TestPostPointsAsync_FromObjects()
+        {
+            try
+            {
+                var client = new InfluxDBClient(influxUrl, dbUName, dbpwd);
+                var time = DateTime.Now;
+
+                var points = Enumerable.Range(0, 3).Select(i =>
+                    new PointObjectWithStringRetention
+                    {
+                        Time = DateTime.UtcNow,
+                        Measurement = measurementName,
+                        Precision = TimePrecision.Milliseconds,
+                        StringTag = "FromObject",
+                        IntTag = DataGen.RandomInt(),
+                        StringField = DataGen.RandomString(),
+                        DoubleField = DataGen.RandomDouble(),
+                        IntField = DataGen.RandomInt(),
+                        BoolField = i % 2 == 0,
+                    }
+                );
+
+                var r = await client.PostPointsAsync(dbName, points);
+                Assert.IsTrue(r, "PostPointsAsync returned false");
+            }
+            catch (Exception e)
+            {
+
+                Assert.Fail($"Unexpected exception of type {e.GetType()} caught: {e.Message}");
             }
         }
 
@@ -458,7 +538,38 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
                 valMixed.MeasurementName = measurementName;
                 valMixed.Precision = TimePrecision.Seconds;
                 var r = await client.PostPointAsync(dbName, valMixed);
-                Assert.IsTrue(r, "PostPointAsync retunred false");
+                Assert.IsTrue(r, "PostPointAsync returned false");
+            }
+            catch (Exception e)
+            {
+
+                Assert.Fail($"Unexpected exception of type {e.GetType()} caught: {e.Message}");
+                return;
+            }
+        }
+
+        [TestMethod, TestCategory("Post")]
+        public async Task TestPostObjectPointAsync()
+        {
+            try
+            {
+                var client = new InfluxDBClient(influxUrl, dbUName, dbpwd);
+
+                var point = new PointObjectWithStringRetention
+                {
+                    Time = DateTime.UtcNow,
+                    Measurement = measurementName,
+                    Precision = TimePrecision.Seconds,
+                    StringTag = "FromObject",
+                    IntTag = DataGen.RandomInt(),
+                    StringField = DataGen.RandomString(),
+                    DoubleField = DataGen.RandomDouble(),
+                    IntField = DataGen.RandomInt(),
+                    BoolField = true,
+                };
+
+                var r = await client.PostPointAsync(dbName, point);
+                Assert.IsTrue(r, "PostPointAsync returned false");
             }
             catch (Exception e)
             {
@@ -490,7 +601,7 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
                 valMixed.Retention = new InfluxRetentionPolicy() { Duration = TimeSpan.FromHours(6) };
 
                 var r = await client.PostPointAsync(dbName, valMixed);
-                Assert.IsTrue(r && valMixed.Saved, "PostPointAsync retunred false");
+                Assert.IsTrue(r && valMixed.Saved, "PostPointAsync returned false");
             }
             catch (Exception e)
             {
@@ -639,7 +750,7 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
 
             s.Stop();
             Debug.WriteLine($"Elapsed{s.ElapsedMilliseconds}");
-            Assert.IsTrue(r != null && r.Count > 0, "QueryMultiSeriesAsync retunred null or invalid data");
+            Assert.IsTrue(r != null && r.Count > 0, "QueryMultiSeriesAsync returned null or invalid data");
         }
 
 
@@ -667,7 +778,7 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
                 }
 
                 var r = await client.PostPointsAsync(dbName, points);
-                Assert.IsTrue(r, "PostPointsAsync retunred false");
+                Assert.IsTrue(r, "PostPointsAsync returned false");
 
                 var values = await client.QueryMultiSeriesAsync(dbName, "select * from /Precision[A-Za-z]s/");
                 foreach (var val in values)
@@ -727,7 +838,7 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
                 }
 
                 var r = await client.PostPointsAsync(dbName, points);
-                Assert.IsTrue(r, "PostPointsAsync retunred false");
+                Assert.IsTrue(r, "PostPointsAsync returned false");
 
                 var values = await client.QueryMultiSeriesAsync(dbName, $"select sum(Val) from ChunkTest where TestTime ='{ TestTime}' group by ChunkSeries", chunkSize * 10);
                 foreach (var val in values)
@@ -771,7 +882,7 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
                 }
 
                 var r = await client.PostPointsAsync(dbName, points);
-                Assert.IsTrue(r, "PostPointsAsync retunred false");
+                Assert.IsTrue(r, "PostPointsAsync returned false");
 
                 var values = await client.QueryMultiSeriesAsync(dbName, $"select Val from ChunkTest where TestTime ='{ TestTime}' limit {chunkSize * 5}", chunkSize);
                 foreach (var val in values)
@@ -797,7 +908,7 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
                 var points = await CreateTestPoints("RetentionTest", 10, TimePrecision.Nanoseconds, retention);
 
                 var r = await client.PostPointsAsync(dbName, points);
-                Assert.IsTrue(r, "PostPointsAsync retunred false");
+                Assert.IsTrue(r, "PostPointsAsync returned false");
 
                 Assert.IsTrue(points.Count(p => p.Saved) == 10, "PostPointsAsync failed with autogen default retention policy");
             }
@@ -836,7 +947,7 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
         }
 
         [TestMethod, TestCategory("Post")]
-        public async Task TestPostPointsAsync_OlderthanRetention()
+        public async Task TestPostPointsAsync_OlderThanRetention()
         {
             try
             {
@@ -845,7 +956,7 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
                 var points = await CreateTestPoints("RetentionTest", 10, TimePrecision.Nanoseconds, retention);
 
                 var r = await client.PostPointsAsync(dbName, points);
-                Assert.IsTrue(r, "PostPointsAsync retunred false");
+                Assert.IsTrue(r, "PostPointsAsync returned false");
 
                 Assert.IsTrue(points.Count(p => p.Saved) == 1, "PostPointsAsync saved points older than retention policy");
 
@@ -865,7 +976,39 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
                 var client = new InfluxDBClient(influxUrl, dbUName, dbpwd);
                 var points = await CreateTestPoints("DefaultPrecisionTest", 10);
                 var r = await client.PostPointsAsync(dbName, points);
-                Assert.IsTrue(r, "PostPointsAsync retunred false");
+                Assert.IsTrue(r, "PostPointsAsync returned false");
+            }
+            catch (Exception e)
+            {
+                Assert.Fail($"Unexpected exception of type {e.GetType()} caught: {e.Message}");
+                return;
+            }
+        }
+
+        [TestMethod, TestCategory("Post")]
+        public async Task TestPostPointsAsync_FromObject_AutogenRetention()
+        {
+            try
+            {
+                var client = new InfluxDBClient(influxUrl, dbUName, dbpwd);
+                var retention = new InfluxRetentionPolicy() { Name = "autogen", DBName = dbName, Duration = TimeSpan.FromMinutes(0), IsDefault = true };
+                var points = Enumerable.Range(0, 10).Select(i =>
+                    new PointObjectWithObjectRetention
+                    {
+                        Measurement = "RetentionTest",
+                        Time = DateTime.UtcNow.AddDays(-i),
+                        Retention = retention,
+                        Precision = TimePrecision.Milliseconds,
+                        StringTag = "FromObject",
+                        IntTag = DataGen.RandomInt(),
+                        StringField = DataGen.RandomString(),
+                        DoubleField = DataGen.RandomDouble(),
+                        IntField = DataGen.RandomInt(),
+                        BoolField = i % 2 == 0,
+                    });
+
+                var r = await client.PostPointsAsync(dbName, points);
+                Assert.IsTrue(r, "PostPointsAsync returned false");
             }
             catch (Exception e)
             {
@@ -970,7 +1113,8 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
                     points.Add(valMixed);
                 }
 
-                Assert.IsTrue(await client.PostPointsAsync(dbName, points, 25000), "PostPointsAsync retunred false");
+                
+                Assert.IsTrue(await client.PostPointsAsync(dbName, points, 25000), "PostPointsAsync returned false");
 
                 var r = await client.QueryMultiSeriesAsync(dbName, "SELECT * FROM Partialtest");
                 Assert.IsTrue(r.All(s => s.Partial), "Not all influx series returned by the query contained the flag 'partial=true'");
@@ -1051,10 +1195,10 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
             var db = "hara-kiri";
             var client = new InfluxDBClient(influxUrl, dbUName, dbpwd);
             var r = await client.CreateDatabaseAsync(db);
-            Assert.IsTrue(r, "CreateDatabaseAsync retunred false");
+            Assert.IsTrue(r, "CreateDatabaseAsync returned false");
             var d = new InfluxDatabase(db);
             r = await client.DropDatabaseAsync(d);
-            Assert.IsTrue(r && d.Deleted, "DropDatabaseAsync retunred false");
+            Assert.IsTrue(r && d.Deleted, "DropDatabaseAsync returned false");
         }
 
         [TestMethod, TestCategory("Drop")]
@@ -1066,7 +1210,7 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
             var r = await client.PostPointsAsync(dbName, points);
             var d = new InfluxMeasurement(measurement);
             r = await client.DropMeasurementAsync(new InfluxDatabase(dbName), d);
-            Assert.IsTrue(r && d.Deleted, "DropMeasurementAsync retunred false");
+            Assert.IsTrue(r && d.Deleted, "DropMeasurementAsync returned false");
         }
 
         [TestMethod, TestCategory("Drop")]
@@ -1096,7 +1240,7 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
                         "purge = yes", 
                         $"time() > {DateTime.UtcNow.AddDays(-4).ToEpoch(TimePrecision.Hours)}" 
                     });
-            Assert.IsTrue(r, "DropMeasurementAsync retunred false");
+            Assert.IsTrue(r, "DropMeasurementAsync returned false");
         }
 
         [TestMethod, TestCategory("Delete")]
@@ -1110,5 +1254,47 @@ namespace AdysTech.InfluxDB.Client.Net.Tests
             await AssertEx.ThrowsAsync<InfluxDBException>(() => client.DeletePointsAsync(new InfluxDatabase(invalidDbName), new InfluxMeasurement(measurement), whereClause: new List<string>() { "purge = yes", $"time() > {DateTime.UtcNow.AddDays(-4).ToEpoch(TimePrecision.Hours)}" }));
 
         }
+    }
+
+    internal abstract class PointObject
+    {
+        [InfluxDBMeasurementName]
+        public string Measurement { get; set; }
+
+        [InfluxDBTime]
+        public DateTime Time { get; set; }
+
+        [InfluxDBPrecision]
+        public TimePrecision Precision { get; set; }
+
+        [InfluxDBField("IntField")]
+        public int IntField { get; set; }
+
+        [InfluxDBField("DoubleField")]
+        public double DoubleField { get; set; }
+
+        [InfluxDBField("BoolField")]
+        public bool BoolField { get; set; }
+
+        [InfluxDBField("StringField")]
+        public string StringField { get; set; }
+
+        [InfluxDBTag("StringTag")]
+        public string StringTag { get; set; }
+
+        [InfluxDBTag("IntTag")]
+        public int IntTag { get; set; }
+    }
+
+    internal class PointObjectWithStringRetention : PointObject
+    {
+        [InfluxDBRetentionPolicy]
+        public string Retention { get; set; }
+    }
+
+    internal class PointObjectWithObjectRetention : PointObject
+    {
+        [InfluxDBRetentionPolicy]
+        public InfluxRetentionPolicy Retention { get; set; }
     }
 }

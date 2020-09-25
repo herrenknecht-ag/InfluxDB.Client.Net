@@ -60,7 +60,7 @@ namespace AdysTech.InfluxDB.Client.Net
         /// <summary>
         /// Dictionary of tags, and their respective values.
         /// </summary>
-        IReadOnlyDictionary<string, string> Tags { get; }
+        IDictionary<string, string> Tags { get; }
 
         /// <summary>
         /// True if the influx query was answered with a partial response due to e.g. exceeding a configured

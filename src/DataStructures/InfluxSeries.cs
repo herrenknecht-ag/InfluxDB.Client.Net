@@ -59,7 +59,7 @@ namespace AdysTech.InfluxDB.Client.Net
         /// <summary>
         /// Dictionary of tags, and their respective values.
         /// </summary>
-        public IReadOnlyDictionary<string, string> Tags { get; internal set; }
+        public IDictionary<string, string> Tags { get; internal set; }
 
         /// <summary>
         /// Indicates whether this Series has any entries or not

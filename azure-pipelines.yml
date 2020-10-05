@@ -52,3 +52,4 @@ steps:
     publishVstsFeed: 'herrenknecht-up'
     versioningScheme: 'off'
     allowPackageConflicts: true
+  condition: eq(variables['Build.SourceBranch'], 'refs/heads/master')

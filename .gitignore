@@ -5,6 +5,8 @@
 *.suo
 *.user
 *.sln.docstates
+.vscode
+.idea
 
 # Build results
 [Dd]ebug/

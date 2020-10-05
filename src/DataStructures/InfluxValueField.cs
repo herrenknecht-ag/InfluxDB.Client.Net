@@ -37,17 +37,17 @@ namespace AdysTech.InfluxDB.Client.Net
             else if (Value is double dblValue)
             {
                 // double has to have a . as decimal seperator for Influx
-                return String.Format(new CultureInfo("en-US"), "{0}", dblValue);
+                return String.Format(CultureInfo.GetCultureInfo("en-US"), "{0}", dblValue);
             }
             else if (Value is float flValue)
             {
                 // double has to have a . as decimal seperator for Influx
-                return String.Format(new CultureInfo("en-US"), "{0}", flValue);
+                return String.Format(CultureInfo.GetCultureInfo("en-US"), "{0}", flValue);
             }
             else if (Value is DateTime dtValue)
             {
                 // Unix nanosecond timestamp. Specify alternative precisions with the HTTP API. The minimum valid timestamp is -9223372036854775806 or 1677-09-21T00:12:43.145224194Z. The maximum valid timestamp is 9223372036854775806 or 2262-04-11T23:47:16.854775806Z.
-                // InfluxDb does not support a datetime type for fields or tags
+                // InfluxDB does not support a datetime type for fields or tags
                 // Convert datetime to UNIX long
                 return dtValue.ToEpoch(TimePrecision.Milliseconds).ToString();
             }

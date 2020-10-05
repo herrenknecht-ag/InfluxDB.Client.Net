@@ -1,6 +1,4 @@
-﻿using AdysTech.InfluxDB.Client.Net.DataContracts;
-using Newtonsoft.Json;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Dynamic;
@@ -11,17 +9,18 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
-using System.Security.Cryptography;
 using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using AdysTech.InfluxDB.Client.Net.DataContracts;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
 
 namespace AdysTech.InfluxDB.Client.Net
 {
     /// <summary>
-    /// Represents precision of the point
+    ///     Represents precision of the point
     /// </summary>
     public enum TimePrecision
     {
@@ -34,436 +33,25 @@ namespace AdysTech.InfluxDB.Client.Net
     }
 
     /// <summary>
-    /// Provides asynchronous interaction channel with InfluxDB engine
+    ///     Provides asynchronous interaction channel with InfluxDB engine
     /// </summary>
     public class InfluxDBClient : IInfluxDBClient, IDisposable
     {
         private readonly ILogger<InfluxDBClient> _logger;
 
-        #region fields
-
-        private readonly string[] precisionLiterals = {"_", "h", "m", "s", "ms", "u", "n"};
-        private readonly string _influxUrl;
-        private HttpClient _client;
-
-        #endregion fields
-
         /// <summary>
-        /// URL for InfluxDB Engine, include complete URL with http/s and port number
-        /// </summary>
-        public string InfluxUrl
-        {
-            get { return _influxUrl; }
-        }
-
-        private readonly string _influxDBUserName;
-
-        /// <summary>
-        /// User Name for InfluxDB if it requires authentication
-        /// </summary>
-        public string InfluxDBUserName
-        {
-            get { return _influxDBUserName; }
-        }
-
-        private readonly string _influxDBPassword;
-
-        /// <summary>
-        /// Password for InfluxDB if it requires authentication
-        /// </summary>
-        public string InfluxDBPassword
-        {
-            get { return _influxDBPassword; }
-        }
-
-        public string InfluxServer
-        {
-            get
-            {
-                if (_influxUrl != null)
-                    return new Uri(_influxUrl).Host;
-                return null;
-            }
-        }
-
-        public int Port
-        {
-            get
-            {
-                if (_influxUrl != null)
-                    return new Uri(_influxUrl).Port;
-                return -1;
-            }
-        }
-
-        #region private methods
-
-        private async Task<HttpResponseMessage> GetAsync(Dictionary<string, string> Query,
-            HttpCompletionOption completion = HttpCompletionOption.ResponseContentRead)
-        {
-            var querybaseUrl = new Uri(InfluxUrl);
-            var builder = new UriBuilder(querybaseUrl);
-            builder.Path += "query";
-            builder.Query = await new FormUrlEncodedContent(Query).ReadAsStringAsync();
-            try
-            {
-                HttpResponseMessage response = await _client.GetAsync(builder.Uri, completion);
-
-                if (response.StatusCode == HttpStatusCode.OK)
-                {
-                    return response;
-                }
-                else if (response.StatusCode == HttpStatusCode.Unauthorized 
-                        || (response.StatusCode == HttpStatusCode.InternalServerError && response.ReasonPhrase == "INKApi Error")
-                        || response.StatusCode == HttpStatusCode.Forbidden
-                        || response.StatusCode == HttpStatusCode.BadGateway
-                        || response.StatusCode == HttpStatusCode.ProxyAuthenticationRequired
-                        || (int)response.StatusCode == 511) //511 NetworkAuthenticationRequired
-                    throw new UnauthorizedAccessException("InfluxDB needs authentication. Check uname, pwd parameters");
-                else if(response.StatusCode == HttpStatusCode.BadGateway || response.StatusCode == HttpStatusCode.GatewayTimeout)
-                {
-                    throw new ServiceUnavailableException(await response.Content.ReadAsStringAsync());
-                }
-                else if (response.StatusCode == HttpStatusCode.BadRequest)
-                {
-                    throw InfluxDBException.ProcessInfluxDBError(await response.Content.ReadAsStringAsync());
-                }
-            }
-            catch (HttpRequestException e)
-            {
-                if (e.InnerException.Message == "Unable to connect to the remote server" ||
-                    e.InnerException.Message == "A connection with the server could not be established" ||
-                    e.InnerException.Message.StartsWith("The remote name could not be resolved:"))
-                    throw new ServiceUnavailableException();
-
-                throw;
-            }
-
-            return null;
-        }
-
-        public TimeSpan GetInfluxClientTimeout()
-        {
-            return _client.Timeout;
-        }
-
-        private async Task<HttpResponseMessage> PostQueryAsync(Dictionary<string, string> EndPoint, string query)
-        {
-            var querybaseUrl = new Uri(InfluxUrl);
-            var builder = new UriBuilder(querybaseUrl);
-            builder.Path += "query";
-
-            builder.Query = await new FormUrlEncodedContent(EndPoint).ReadAsStringAsync();
-
-            try
-            {
-                var body = new StringContent($"q={WebUtility.UrlEncode(query)}", Encoding.UTF8,
-                    "application/x-www-form-urlencoded");
-
-                var request = new HttpRequestMessage(HttpMethod.Post, builder.Uri);
-                request.Content = body;
-
-                var response = _client.SendAsync(request).Result;
-
-                if (response.StatusCode == HttpStatusCode.Unauthorized ||
-                    response.StatusCode == HttpStatusCode.BadGateway ||
-                    (response.StatusCode == HttpStatusCode.InternalServerError &&
-                     response.ReasonPhrase == "INKApi Error")) //502 Connection refused
-                    throw new UnauthorizedAccessException("InfluxDB needs authentication. Check uname, pwd parameters");
-
-                return response;
-            }
-            catch (HttpRequestException e)
-            {
-                if (e.InnerException.Message == "Unable to connect to the remote server")
-                    throw new ServiceUnavailableException();
-
-                throw;
-            }
-        }
-
-        private async Task<HttpResponseMessage> PostAsync(Dictionary<string, string> EndPoint, byte[] requestContent)
-        {
-            var querybaseUrl = new Uri(InfluxUrl);
-            var builder = new UriBuilder(querybaseUrl);
-            builder.Path += "write";
-
-            builder.Query = await new FormUrlEncodedContent(EndPoint).ReadAsStringAsync();
-            //if (requestContent.Headers.ContentType == null)
-            //{
-            //    requestContent.Headers.ContentType = new MediaTypeHeaderValue("application/x-www-form-urlencoded");
-            //    requestContent.Headers.ContentType.CharSet = "UTF-8";
-            //}
-
-            try
-            {
-                using (var outStream = new MemoryStream())
-                {
-                    using (var gZipStream = new GZipStream(outStream, CompressionMode.Compress, true))
-                    {
-                        using (var byeteArrayStream = new MemoryStream(requestContent))
-                            await byeteArrayStream.CopyToAsync(gZipStream);
-                    }
-
-                    var zippedByteArrayContent = new ByteArrayContent(outStream.ToArray());
-                    zippedByteArrayContent.Headers.ContentEncoding.Add("gzip");
-
-                    _logger?.LogDebug("------------- HTTP Request Header ----------------");
-                    foreach (var httpContentHeader in zippedByteArrayContent.Headers)
-                        _logger?.LogDebug("Key: " + httpContentHeader.Key + ", Value: " + httpContentHeader.Value);
-                    _logger?.LogDebug("------------- HTTP Request Header end ----------------");
-
-                    HttpResponseMessage response = await _client.PostAsync(builder.Uri, zippedByteArrayContent);
-
-                    _logger?.LogDebug("------------- HTTP Response Header ----------------");
-                    _logger?.LogDebug("Status code: " + response.StatusCode);
-                    foreach (var httpResponseHeader in response.Headers)
-                        _logger?.LogDebug("Key: " + httpResponseHeader.Key + ", Value: " + httpResponseHeader.Value);
-                    _logger?.LogDebug("------------- HTTP Response Header end ----------------");
-
-                    if (response.StatusCode == HttpStatusCode.Unauthorized
-                       || (response.StatusCode == HttpStatusCode.InternalServerError && response.ReasonPhrase == "INKApi Error")
-                       || response.StatusCode == HttpStatusCode.Forbidden
-                       || response.StatusCode == HttpStatusCode.BadGateway
-                       || response.StatusCode == HttpStatusCode.ProxyAuthenticationRequired
-                       || (int)response.StatusCode == 511) //511 NetworkAuthenticationRequired
-                        throw new UnauthorizedAccessException("InfluxDB needs authentication. Check uname, pwd parameters");
-                    else if (response.StatusCode == HttpStatusCode.BadGateway || response.StatusCode == HttpStatusCode.GatewayTimeout)
-                    {
-                        throw new ServiceUnavailableException(await response.Content.ReadAsStringAsync());
-                    }
-                    else if (response.StatusCode == HttpStatusCode.BadRequest)
-                    {
-                        throw InfluxDBException.ProcessInfluxDBError(await response.Content.ReadAsStringAsync());
-                    }
-
-                    return response;
-                }
-            }
-            catch (HttpRequestException e)
-            {
-                if (e.InnerException.Message == "Unable to connect to the remote server")
-                    throw new ServiceUnavailableException();
-
-                throw;
-            }
-        }
-
-        private async Task<bool> PostPointsAsync(string dbName, TimePrecision precision, string retention,
-            IEnumerable<IInfluxDatapoint> points)
-        {
-            Regex multiLinePattern = new Regex(@"([\P{Cc}].*?) '([\P{Cc}].*?)':([\P{Cc}].*?)\\n", RegexOptions.Compiled,
-                TimeSpan.FromSeconds(5));
-            Regex oneLinePattern = new Regex(@"{\""error"":""([9\P{Cc}]+) '([\P{Cc}]+)':([a-zA-Z0-9 ]+)",
-                RegexOptions.Compiled, TimeSpan.FromSeconds(5));
-
-            //allocate minimum of 128 bytes per point, reducing future allocation and resize costs
-            var line = new StringBuilder(points.Count() * 128);
-            foreach (var point in points)
-            {
-                point.ConvertToInfluxLineProtocol(line);
-                line.Append("\n");
-            }
-
-            //remove last \n
-            line.Remove(line.Length - 1, 1);
-
-            var endPoint = new Dictionary<string, string>() {{"db", dbName}};
-            if (precision > 0)
-                endPoint.Add("precision", precisionLiterals[(int) precision]);
-
-            if (!String.IsNullOrWhiteSpace(retention))
-                endPoint.Add("rp", retention);
-
-            _logger?.LogDebug("Function PostPointsAsync has " + points.Count() + " points.");
-            foreach (var endPointValues in endPoint)
-                _logger?.LogDebug("FormUrlEncodedContent part key: " + endPointValues.Key + " and value: " + endPointValues.Value);
-
-            HttpResponseMessage response = await PostAsync(endPoint, Encoding.UTF8.GetBytes(line.ToString()));
-            line.Clear();
-
-            if (response.StatusCode == HttpStatusCode.Unauthorized
-                       || (response.StatusCode == HttpStatusCode.InternalServerError && response.ReasonPhrase == "INKApi Error")
-                       || response.StatusCode == HttpStatusCode.Forbidden
-                       || response.StatusCode == HttpStatusCode.BadGateway
-                       || response.StatusCode == HttpStatusCode.ProxyAuthenticationRequired
-                       || (int)response.StatusCode == 511) //511 NetworkAuthenticationRequired
-                throw new UnauthorizedAccessException("InfluxDB needs authentication. Check uname, pwd parameters");
-            else if (response.StatusCode == HttpStatusCode.BadGateway || response.StatusCode == HttpStatusCode.GatewayTimeout)
-            {
-                throw new ServiceUnavailableException(await response.Content.ReadAsStringAsync());
-            }
-            //if(response.StatusCode==HttpStatusCode.NotFound)
-            else if (response.StatusCode == HttpStatusCode.BadRequest)
-            {
-                var content = await response.Content.ReadAsStringAsync();
-                //regex assumes error text from https://github.com/influxdata/influxdb/blob/master/models/points.go ParsePointsWithPrecision
-                //fmt.Sprintf("'%s': %v", string(block[start:len(block)])
-                List<string> parts = null;
-                string l = "";
-
-                if (content.Contains("partial write"))
-                {
-                    if (content.Contains("\\n"))
-                        parts = multiLinePattern.Matches(content.Substring(content.IndexOf("partial write:\\n") + 16))
-                            .ToList();
-                    else
-                        parts = oneLinePattern.Matches(content.Substring(content.IndexOf("partial write:\\n") + 16))
-                            .ToList();
-
-                    if (parts.Count == 0)
-                        throw new InfluxDBException("Partial Write",
-                            new Regex(@"\""error\"":\""(.*?)\""").Match(content).Groups[1].Value);
-
-                    if (parts[1].Contains("\\n"))
-                        l = parts[1].Substring(0, parts[1].IndexOf("\\n")).Unescape();
-                    else
-                        l = parts[1].Unescape();
-
-                    var point = points.Where(p => p.ConvertToInfluxLineProtocol() == l).FirstOrDefault();
-                    if (point != null)
-                        throw new InfluxDBException("Partial Write", $"Partial Write : {parts?[0]} due to {parts?[2]}",
-                            point);
-                    else
-                        throw new InfluxDBException("Partial Write", $"Partial Write : {parts?[0]} due to {parts?[2]}",
-                            l);
-                }
-                else
-                {
-                    throw InfluxDBException.ProcessInfluxDBError(content);
-                }
-            }
-            else if (response.StatusCode == HttpStatusCode.InternalServerError)
-            {
-                throw new Exception(await response.Content.ReadAsStringAsync());
-            }
-            else if (response.StatusCode == HttpStatusCode.NoContent)
-                return true;
-            else
-                return false;
-        }
-
-        private static IInfluxDatapoint ToInfluxDataPoint<T>(T point)
-        {
-            if (typeof(IInfluxDatapoint).IsAssignableFrom(typeof(T)))
-            {
-                return point as IInfluxDatapoint;
-            }
-
-            var measurementProp = typeof(T)
-               .GetProperties()
-               .Where(prop => prop.IsDefined(typeof(InfluxDBMeasurementName), true))
-               .ToList();
-            if (!measurementProp.Any())
-                throw new CustomAttributeFormatException("InfluxDBMeasurement attribute is required on object published to InfluxDB");
-            var measurementName = measurementProp.First().GetValue(point, null) as string;
-
-            var timeProp = typeof(T)
-               .GetProperties()
-               .Where(prop => prop.IsDefined(typeof(InfluxDBTime), true))
-               .ToList();
-            var time = timeProp.Any() ? (DateTime)timeProp.First().GetValue(point, null) : DateTime.UtcNow;
-
-            var precisionProp = typeof(T)
-               .GetProperties()
-               .Where(prop => prop.IsDefined(typeof(InfluxDBPrecision), true))
-               .ToList();
-            var precision = precisionProp.Any()
-               ? (TimePrecision)precisionProp.First().GetValue(point, null)
-               : TimePrecision.Seconds;
-
-            var retentionProp = typeof(T)
-                .GetProperties()
-                .Where(prop => prop.IsDefined(typeof(InfluxDBRetentionPolicy), true))
-                .ToList();
-            var retentionPolicy = retentionProp.Any()
-                ? retentionProp.First().GetValue(point, null) is IInfluxRetentionPolicy policy 
-                    ? policy 
-                    : new InfluxRetentionPolicy
-                    {
-                        Name = retentionProp.First().GetValue(point, null) as string
-                    }
-                : null;
-
-            var tags = typeof(T)
-               .GetProperties()
-               .Where(prop => prop.IsDefined(typeof(InfluxDBTag), true))
-               .ToDictionary(
-                  prop => (prop.GetCustomAttributes(typeof(InfluxDBTag), true).First() as InfluxDBTag)?.Name,
-                  prop => prop.GetValue(point, null).ToString()
-               );
-
-            var fields = typeof(T)
-               .GetProperties()
-               .Where(prop => prop.IsDefined(typeof(InfluxDBField), true))
-               .ToDictionary(
-                  prop => (prop.GetCustomAttributes(typeof(InfluxDBField), true).First() as InfluxDBField)?.Name,
-                  prop => new InfluxValueField(prop.GetValue(point, null) as IComparable)
-               );
-
-            return new InfluxDatapoint<InfluxValueField>
-            {
-                Precision = precision,
-                UtcTimestamp = time,
-                MeasurementName = measurementName,
-                Retention = retentionPolicy,
-                Tags = tags,
-                Fields = fields
-            };
-        }
-
-        private static T FromInfluxDataPoint<T>(dynamic entry)
-        {
-            var instance = (T)Activator.CreateInstance(typeof(T));
-            var timeProp = typeof(T)
-                .GetProperties()
-                .Where(prop => prop.IsDefined(typeof(InfluxDBTime), true))
-                .ToList();
-            if (timeProp.Any())
-                timeProp.First().SetValue(instance, entry.Time);
-
-            var dict = (IDictionary<string, object>)entry;
-
-            foreach (var prop in typeof(T)
-                .GetProperties()
-                .Where(prop => prop.IsDefined(typeof(InfluxDBTag), true))
-                .Where(prop =>
-                    dict.ContainsKey((prop.GetCustomAttributes(typeof(InfluxDBTag), true).First() as InfluxDBTag)?.Name ?? "")))
-            {
-                var converter = TypeDescriptor.GetConverter(prop.PropertyType);
-                var tagName = (Enumerable.First(prop.GetCustomAttributes(typeof(InfluxDBTag), true)) as InfluxDBTag)?.Name;
-                prop.SetValue(instance, converter.ConvertFrom(null, CultureInfo.InvariantCulture, dict[tagName ?? ""].ToString()));
-            }
-
-            foreach (var prop in typeof(T)
-                .GetProperties()
-                .Where(prop => prop.IsDefined(typeof(InfluxDBField), true))
-                .Where(prop =>
-                    dict.ContainsKey((prop.GetCustomAttributes(typeof(InfluxDBField), true).First() as InfluxDBField)?.Name ?? "")))
-            {
-                var converter = TypeDescriptor.GetConverter(prop.PropertyType);
-                var fieldName = (Enumerable.First(prop.GetCustomAttributes(typeof(InfluxDBField), true)) as InfluxDBField)?.Name;
-                prop.SetValue(instance, converter.ConvertFrom(null, CultureInfo.InvariantCulture, dict[fieldName ?? ""].ToString()));
-            }
-
-            return instance;
-        }
-
-        #endregion private methods
-
-        /// <summary>
-        /// Creates the InfluxDB Client
+        ///     Creates the InfluxDB Client
         /// </summary>
         /// <param name="InfluxUrl">Url for the Inflex Server, e.g. http://localhost:8086</param>
         /// <param name="UserName">User name to authenticate InflexDB</param>
         /// <param name="Password">password</param>
         public InfluxDBClient(string InfluxUrl, string UserName, string Password) :
-            this(InfluxUrl, UserName, Password, null, null, null)
+            this(InfluxUrl, UserName, Password, null, null)
         {
         }
 
         /// <summary>
-        /// Creates the InfluxDB Client
+        ///     Creates the InfluxDB Client
         /// </summary>
         /// <param name="InfluxUrl">Url for the Inflex Server, e.g. http://localhost:8086</param>
         /// <param name="UserName">User name to authenticate InflexDB</param>
@@ -474,9 +62,9 @@ namespace AdysTech.InfluxDB.Client.Net
         {
             try
             {
-                this._influxUrl = InfluxUrl;
-                this._influxDBUserName = UserName;
-                this._influxDBPassword = Password;
+                this.InfluxUrl = InfluxUrl;
+                InfluxDBUserName = UserName;
+                InfluxDBPassword = Password;
                 _logger = logger;
 
                 if (!httpClientTimeout.HasValue)
@@ -487,7 +75,7 @@ namespace AdysTech.InfluxDB.Client.Net
                 else
                     _client = new HttpClient();
 
-                if (!(String.IsNullOrWhiteSpace(InfluxDBUserName) && String.IsNullOrWhiteSpace(InfluxDBPassword)))
+                if (!(string.IsNullOrWhiteSpace(InfluxDBUserName) && string.IsNullOrWhiteSpace(InfluxDBPassword)))
                     _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic",
                         Convert.ToBase64String(Encoding.UTF8.GetBytes($"{InfluxDBUserName}:{InfluxDBPassword}")));
 
@@ -503,24 +91,68 @@ namespace AdysTech.InfluxDB.Client.Net
         }
 
         /// <summary>
-        /// Creates the InfluxDB Client
+        ///     Creates the InfluxDB Client
         /// </summary>
         /// <param name="InfluxUrl">Url for the Inflex Server, e.g. localhost:8086</param>
         public InfluxDBClient(string InfluxUrl)
-            : this(InfluxUrl, null, null, null, null, null)
+            : this(InfluxUrl, null, null, null, null)
         {
         }
 
         /// <summary>
-        /// Queries and Gets list of all existing databases in the Influx server instance
+        ///     URL for InfluxDB Engine, include complete URL with http/s and port number
+        /// </summary>
+        public string InfluxUrl { get; }
+
+        /// <summary>
+        ///     User Name for InfluxDB if it requires authentication
+        /// </summary>
+        public string InfluxDBUserName { get; }
+
+        /// <summary>
+        ///     Password for InfluxDB if it requires authentication
+        /// </summary>
+        public string InfluxDBPassword { get; }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        public string InfluxServer
+        {
+            get
+            {
+                if (InfluxUrl != null)
+                    return new Uri(InfluxUrl).Host;
+                return null;
+            }
+        }
+
+        public int Port
+        {
+            get
+            {
+                if (InfluxUrl != null)
+                    return new Uri(InfluxUrl).Port;
+                return -1;
+            }
+        }
+
+        /// <summary>
+        ///     Queries and Gets list of all existing databases in the Influx server instance
         /// </summary>
         /// <returns>List of DB names, empty list incase of an error</returns>
-        ///<exception cref="UnauthorizedAccessException">When Influx needs authentication, and no user name password is supplied or auth fails</exception>
-        ///<exception cref="HttpRequestException">all other HTTP exceptions</exception>
-        ///<exception cref="ServiceUnavailableException">InfluxDB service is not available on the port mentioned</exception>
-        public async Task<List<String>> GetInfluxDBNamesAsync()
+        /// <exception cref="UnauthorizedAccessException">
+        ///     When Influx needs authentication, and no user name password is supplied
+        ///     or auth fails
+        /// </exception>
+        /// <exception cref="HttpRequestException">all other HTTP exceptions</exception>
+        /// <exception cref="ServiceUnavailableException">InfluxDB service is not available on the port mentioned</exception>
+        public async Task<List<string>> GetInfluxDBNamesAsync()
         {
-            var dbNames = new List<String>();
+            var dbNames = new List<string>();
 
             var dbs = await QueryMultiSeriesAsync(null, "SHOW DATABASES");
 
@@ -531,12 +163,15 @@ namespace AdysTech.InfluxDB.Client.Net
         }
 
         /// <summary>
-        /// Gets the whole DB structure for the given databse in Influx.
+        ///     Gets the whole DB structure for the given databse in Influx.
         /// </summary>
         /// <param name="dbName">Name of the database</param>
-        /// <returns>Hierarchical structure, Database<Measurement<Tags,Fields>></returns>
-        ///<exception cref="UnauthorizedAccessException">When Influx needs authentication, and no user name password is supplied or auth fails</exception>
-        ///<exception cref="HttpRequestException">all other HTTP exceptions</exception>
+        /// <returns>Hierarchical structure, Database<Measurement<Tags, Fields>></returns>
+        /// <exception cref="UnauthorizedAccessException">
+        ///     When Influx needs authentication, and no user name password is supplied
+        ///     or auth fails
+        /// </exception>
+        /// <exception cref="HttpRequestException">all other HTTP exceptions</exception>
         public async Task<IInfluxDatabase> GetInfluxDBStructureAsync(string dbName)
         {
             var dbStructure = new InfluxDatabase(dbName);
@@ -545,7 +180,7 @@ namespace AdysTech.InfluxDB.Client.Net
             {
                 dbStructure.MeasurementHierarchy.Add(policy, new HashSet<IInfluxMeasurement>());
 
-                var fields = await QueryMultiSeriesAsync(dbName: dbName, retentionPolicy: policy.Name,
+                var fields = await QueryMultiSeriesAsync(dbName, retentionPolicy: policy.Name,
                     measurementQuery: "SHOW FIELD KEYS");
                 foreach (var s in fields)
                 {
@@ -557,10 +192,10 @@ namespace AdysTech.InfluxDB.Client.Net
                         measurement.Fields.Add(e.FieldKey);
 
                     measurement.SeriesCount =
-                        (await QueryMultiSeriesAsync(dbName: dbName, retentionPolicy: policy.Name,
+                        (await QueryMultiSeriesAsync(dbName, retentionPolicy: policy.Name,
                             measurementQuery: "SHOW SERIES")).FirstOrDefault().Entries?.Count() ?? -1;
 
-                    var points = (IDictionary<string, object>) (await QueryMultiSeriesAsync(dbName: dbName,
+                    var points = (IDictionary<string, object>) (await QueryMultiSeriesAsync(dbName,
                             retentionPolicy: policy.Name, measurementQuery: $"select count(*) from \"{s.SeriesName}\""))
                         .FirstOrDefault().Entries?.FirstOrDefault();
                     //influx returns point counts for each of the fields. Pick the larget of them as total points in the measurement
@@ -568,7 +203,7 @@ namespace AdysTech.InfluxDB.Client.Net
                         measurement.Fields.Select(f => int.Parse(points[$"Count_{f}"].ToString())).Max();
                 }
 
-                var tags = await QueryMultiSeriesAsync(dbName: dbName, retentionPolicy: policy.Name,
+                var tags = await QueryMultiSeriesAsync(dbName, retentionPolicy: policy.Name,
                     measurementQuery: "SHOW TAG KEYS");
                 foreach (var t in tags)
                 {
@@ -582,15 +217,18 @@ namespace AdysTech.InfluxDB.Client.Net
         }
 
         /// <summary>
-        /// Creates the specified database
+        ///     Creates the specified database
         /// </summary>
         /// <param name="dbName"></param>
         /// <returns>True:success, Fail:Failed to create db</returns>
-        ///<exception cref="UnauthorizedAccessException">When Influx needs authentication, and no user name password is supplied or auth fails</exception>
-        ///<exception cref="HttpRequestException">all other HTTP exceptions</exception>
+        /// <exception cref="UnauthorizedAccessException">
+        ///     When Influx needs authentication, and no user name password is supplied
+        ///     or auth fails
+        /// </exception>
+        /// <exception cref="HttpRequestException">all other HTTP exceptions</exception>
         public async Task<bool> CreateDatabaseAsync(string dbName)
         {
-            var response = await GetAsync(new Dictionary<string, string>() {{"q", $"CREATE DATABASE \"{dbName}\""}});
+            var response = await GetAsync(new Dictionary<string, string> {{"q", $"CREATE DATABASE \"{dbName}\""}});
             if (response.StatusCode == HttpStatusCode.OK)
             {
                 var content = await response.Content.ReadAsStringAsync();
@@ -603,85 +241,91 @@ namespace AdysTech.InfluxDB.Client.Net
         }
 
         /// <summary>
-        /// Posts raw write request to Influx.
+        ///     Posts raw write request to Influx.
         /// </summary>
         /// <param name="dbName">Name of the Database</param>
         /// <param name="precision">Unit of the timestamp, Hour->nanosecond</param>
         /// <param name="content">Raw request, as per Line Protocol</param>
-        /// <see cref="https://influxdb.com/docs/v0.9/write_protocols/write_syntax.html#http"/>
+        /// <see cref="https://influxdb.com/docs/v0.9/write_protocols/write_syntax.html#http" />
         /// <returns>true:success, false:failure</returns>
         public async Task<bool> PostRawValueAsync(string dbName, TimePrecision precision, string content)
         {
-            HttpResponseMessage response =
+            var response =
                 await PostAsync(
-                    new Dictionary<string, string>()
-                        {{"db", dbName}, {"precision", precisionLiterals[(int) precision]}},
+                    new Dictionary<string, string> {{"db", dbName}, {"precision", precisionLiterals[(int) precision]}},
                     Encoding.UTF8.GetBytes(content));
 
             if (response.StatusCode == HttpStatusCode.NoContent)
                 return true;
-            else
-                return false;
+            return false;
         }
 
         /// <summary>
-        /// Posts an InfluxDataPoint to given measurement
+        ///     Posts an InfluxDataPoint to given measurement
         /// </summary>
         /// <param name="dbName">InfluxDB database name</param>
         /// <param name="point">Influx data point to be written</param>
         /// <returns>True:Success, False:Failure</returns>
-        ///<exception cref="UnauthorizedAccessException">When Influx needs authentication, and no user name password is supplied or auth fails</exception>
-        ///<exception cref="HttpRequestException">all other HTTP exceptions</exception>
+        /// <exception cref="UnauthorizedAccessException">
+        ///     When Influx needs authentication, and no user name password is supplied
+        ///     or auth fails
+        /// </exception>
+        /// <exception cref="HttpRequestException">all other HTTP exceptions</exception>
         public async Task<bool> PostPointAsync(string dbName, IInfluxDatapoint point)
         {
-            var endPoint = new Dictionary<string, string>()
+            var endPoint = new Dictionary<string, string>
             {
                 {"db", dbName},
                 {"precision", precisionLiterals[(int) point.Precision]}
             };
-            if (!String.IsNullOrWhiteSpace(point.Retention?.Name))
+            if (!string.IsNullOrWhiteSpace(point.Retention?.Name))
                 endPoint.Add("rp", point.Retention?.Name);
-            HttpResponseMessage response =
+            var response =
                 await PostAsync(endPoint, Encoding.UTF8.GetBytes(point.ConvertToInfluxLineProtocol()));
 
             if (response.StatusCode == HttpStatusCode.BadRequest)
-            {
                 throw InfluxDBException.ProcessInfluxDBError(await response.Content.ReadAsStringAsync());
-            }
-            else if (response.StatusCode == HttpStatusCode.NoContent)
+
+            if (response.StatusCode == HttpStatusCode.NoContent)
             {
                 point.Saved = true;
                 return true;
             }
-            else
-            {
-                point.Saved = false;
-                return false;
-            }
+
+            point.Saved = false;
+            return false;
         }
 
         /// <summary>
-        /// Posts an arbitrary object decorated with InfluxDB attributes to a given measurement
+        ///     Posts an arbitrary object decorated with InfluxDB attributes to a given measurement
         /// </summary>
         /// <param name="dbName">InfluxDB database name</param>
         /// <param name="point">Object to be converted to influx data point and written</param>
         /// <returns>True:Success, False:Failure</returns>
-        ///<exception cref="UnauthorizedAccessException">When Influx needs authentication, and no user name password is supplied or auth fails</exception>
-        ///<exception cref="HttpRequestException">all other HTTP exceptions</exception>   
-        ///<exception cref="CustomAttributeFormatException">When the provided object is missing required attributes</exception>   
-        public Task<bool> PostPointAsync<T>(string dbName, T point) 
-            => PostPointAsync(dbName, ToInfluxDataPoint(point));
+        /// <exception cref="UnauthorizedAccessException">
+        ///     When Influx needs authentication, and no user name password is supplied
+        ///     or auth fails
+        /// </exception>
+        /// <exception cref="HttpRequestException">all other HTTP exceptions</exception>
+        /// <exception cref="CustomAttributeFormatException">When the provided object is missing required attributes</exception>
+        public Task<bool> PostPointAsync<T>(string dbName, T point)
+        {
+            return PostPointAsync(dbName, ToInfluxDataPoint(point));
+        }
 
         /// <summary>
-        /// Posts series of InfluxDataPoints to given measurement, in batches of 255
+        ///     Posts series of InfluxDataPoints to given measurement, in batches of 255
         /// </summary>
         /// <param name="dbName">InfluxDB database name</param>
         /// <param name="Points">Collection of Influx data points to be written</param>
         /// <param name="maxBatchSize">Maximal size of Influx batch to be written</param>
         /// <returns>True:Success, False:Failure, or partial failure</returns>
         /// Sets Saved property on InfluxDatapoint to true to successful points
-        ///<exception cref="UnauthorizedAccessException">When Influx needs authentication, and no user name password is supplied or auth fails</exception>
-        ///<exception cref="HttpRequestException">all other HTTP exceptions</exception>
+        /// <exception cref="UnauthorizedAccessException">
+        ///     When Influx needs authentication, and no user name password is supplied
+        ///     or auth fails
+        /// </exception>
+        /// <exception cref="HttpRequestException">all other HTTP exceptions</exception>
         public async Task<bool> PostPointsAsync(string dbName, IEnumerable<IInfluxDatapoint> Points,
             int maxBatchSize = 255)
         {
@@ -697,23 +341,12 @@ namespace AdysTech.InfluxDB.Client.Net
                     .Select(x => x.Select(v => v.Point)); //get the points
                 foreach (var points in pointsGroup)
                 {
-                    try
-                    {
-                        _logger?.LogDebug("Group key name is: " + group.Key.Name + " point parts are: " + points.Count());
-                        result = await PostPointsAsync(dbName, group.Key.Precision, group.Key.Name, points);
-                    }
-#pragma warning disable CS0168 // The variable 'ex' is declared but never used
-                    catch (Exception ex)
-#pragma warning restore CS0168 // The variable 'ex' is declared but never used
-                    {
-                        throw;
-                    }
+                    _logger?.LogDebug(
+                        "Group key name is: " + group.Key.Name + " point parts are: " + points.Count());
+                    result = await PostPointsAsync(dbName, group.Key.Precision, group.Key.Name, points);
 
                     finalResult = result && finalResult;
-                    if (result)
-                    {
-                        points.ToList().ForEach(p => p.Saved = true);
-                    }
+                    if (result) points.ToList().ForEach(p => p.Saved = true);
                 }
             }
 
@@ -721,20 +354,25 @@ namespace AdysTech.InfluxDB.Client.Net
         }
 
         /// <summary>
-        /// Posts series of arbitrary objects decorated with InfluxDB attributes to a given measurement, in batches of 255
+        ///     Posts series of arbitrary objects decorated with InfluxDB attributes to a given measurement, in batches of 255
         /// </summary>
         /// <param name="dbName">InfluxDB database name</param>
         /// <param name="Points">Collection of object to be converted to data points and be written</param>
         /// <param name="maxBatchSize">Maximal size of Influx batch to be written</param>
         /// <returns>True:Success, False:Failure</returns>
-        ///<exception cref="UnauthorizedAccessException">When Influx needs authentication, and no user name password is supplied or auth fails</exception>
-        ///<exception cref="HttpRequestException">all other HTTP exceptions</exception>
-        ///<exception cref="CustomAttributeFormatException">When the provided object is missing required attributes</exception>   
+        /// <exception cref="UnauthorizedAccessException">
+        ///     When Influx needs authentication, and no user name password is supplied
+        ///     or auth fails
+        /// </exception>
+        /// <exception cref="HttpRequestException">all other HTTP exceptions</exception>
+        /// <exception cref="CustomAttributeFormatException">When the provided object is missing required attributes</exception>
         public Task<bool> PostPointsAsync<T>(string dbName, IEnumerable<T> points, int maxBatchSize = 255)
-            => PostPointsAsync(dbName, points.Select(ToInfluxDataPoint), maxBatchSize);
+        {
+            return PostPointsAsync(dbName, points.Select(ToInfluxDataPoint), maxBatchSize);
+        }
 
         /// <summary>
-        /// InfluxDB engine version
+        ///     InfluxDB engine version
         /// </summary>
         public async Task<string> GetServerVersionAsync()
         {
@@ -743,26 +381,23 @@ namespace AdysTech.InfluxDB.Client.Net
             builder.Path += "ping";
             try
             {
-                HttpResponseMessage response = await _client.GetAsync(builder.Uri);
+                var response = await _client.GetAsync(builder.Uri);
 
                 if (response.StatusCode == HttpStatusCode.NoContent)
-                {
                     return response.Headers.GetValues("X-Influxdb-Version").FirstOrDefault();
-                }
+
                 if (response.StatusCode == HttpStatusCode.Unauthorized
-                       || (response.StatusCode == HttpStatusCode.InternalServerError && response.ReasonPhrase == "INKApi Error")
-                       || response.StatusCode == HttpStatusCode.Forbidden
-                       || response.StatusCode == HttpStatusCode.ProxyAuthenticationRequired
-                       || (int)response.StatusCode == 511) //511 NetworkAuthenticationRequired
+                    || response.StatusCode == HttpStatusCode.InternalServerError &&
+                    response.ReasonPhrase == "INKApi Error"
+                    || response.StatusCode == HttpStatusCode.Forbidden
+                    || response.StatusCode == HttpStatusCode.ProxyAuthenticationRequired
+                    || (int) response.StatusCode == 511) //511 NetworkAuthenticationRequired
                     throw new UnauthorizedAccessException("InfluxDB needs authentication. Check uname, pwd parameters");
-                else if (response.StatusCode == HttpStatusCode.BadGateway || response.StatusCode == HttpStatusCode.GatewayTimeout)
-                {
+                if (response.StatusCode == HttpStatusCode.BadGateway ||
+                    response.StatusCode == HttpStatusCode.GatewayTimeout)
                     throw new ServiceUnavailableException(await response.Content.ReadAsStringAsync());
-                }
-                else if (response.StatusCode == HttpStatusCode.BadRequest)
-                {
+                if (response.StatusCode == HttpStatusCode.BadRequest)
                     throw InfluxDBException.ProcessInfluxDBError(await response.Content.ReadAsStringAsync());
-                }
             }
             catch (HttpRequestException e)
             {
@@ -774,7 +409,7 @@ namespace AdysTech.InfluxDB.Client.Net
         }
 
         /// <summary>
-        /// Gets the list of retention policies present in a DB
+        ///     Gets the list of retention policies present in a DB
         /// </summary>
         /// <param name="dbName">Name of the database</param>
         /// <returns>List of InfluxRetentionPolicy objects</returns>
@@ -785,12 +420,12 @@ namespace AdysTech.InfluxDB.Client.Net
 
             foreach (var policy in rawpolicies.FirstOrDefault()?.Entries ?? Enumerable.Empty<dynamic>())
             {
-                var pol = new InfluxRetentionPolicy()
+                var pol = new InfluxRetentionPolicy
                 {
                     DBName = dbName,
                     Name = policy.Name,
                     Duration = StringHelper.ParseDuration(policy.Duration),
-                    IsDefault = (policy.Default == "true"),
+                    IsDefault = policy.Default == "true",
                     ReplicaN = int.Parse(policy.ReplicaN),
                     Saved = true
                 };
@@ -810,7 +445,7 @@ namespace AdysTech.InfluxDB.Client.Net
         }
 
         /// <summary>
-        /// Creates a retention policy
+        ///     Creates a retention policy
         /// </summary>
         /// <param name="policy">An instance of the Retention Policy, DBName, Name and Duration must be set</param>
         /// <returns>True: Success</returns>
@@ -819,7 +454,7 @@ namespace AdysTech.InfluxDB.Client.Net
             var query = (policy as InfluxRetentionPolicy).GetCreateSyntax();
             if (query != null)
             {
-                var response = await GetAsync(new Dictionary<string, string>() {{"q", query}});
+                var response = await GetAsync(new Dictionary<string, string> {{"q", query}});
                 if (response.StatusCode == HttpStatusCode.OK)
                 {
                     (policy as InfluxRetentionPolicy).Saved = true;
@@ -831,24 +466,21 @@ namespace AdysTech.InfluxDB.Client.Net
         }
 
         /// <summary>
-        /// Queries Influx DB and gets a time series data back. Ideal for fetching measurement values.
-        /// The return list is of InfluxSeries, and each element in there will have properties named after columns in series
+        ///     Queries Influx DB and gets a time series data back. Ideal for fetching measurement values.
+        ///     The return list is of InfluxSeries, and each element in there will have properties named after columns in series
         /// </summary>
         /// <param name="dbName">Name of the database</param>
         /// <param name="measurementQuery">Query text, Only results with single series are supported for now</param>
         /// <param name="precision">epoch precision of the data set</param>
         /// <returns>List of InfluxSeries</returns>
-        /// <seealso cref="InfluxSeries"/>
+        /// <seealso cref="InfluxSeries" />
         public async Task<List<IInfluxSeries>> QueryMultiSeriesAsync(string dbName, string measurementQuery,
             string retentionPolicy = null, TimePrecision precision = TimePrecision.Nanoseconds)
         {
-            var endPoint = new Dictionary<string, string>()
+            var endPoint = new Dictionary<string, string>
                 {{"db", dbName}, {"q", measurementQuery}, {"epoch", precisionLiterals[(int) precision]}};
 
-            if (retentionPolicy != null)
-            {
-                endPoint.Add("rp", retentionPolicy);
-            }
+            if (retentionPolicy != null) endPoint.Add("rp", retentionPolicy);
 
             var response = await GetAsync(endPoint, HttpCompletionOption.ResponseHeadersRead);
 
@@ -858,19 +490,74 @@ namespace AdysTech.InfluxDB.Client.Net
                 var results = new List<IInfluxSeries>();
                 var rawResult =
                     JsonConvert.DeserializeObject<InfluxResponse>(await response.Content.ReadAsStringAsync());
-                var partialResult = rawResult.Results?.Any(r => r.Partial == true);
+                var partialResult = rawResult.Results?.Any(r => r.Partial);
 
                 if (rawResult?.Results?.Count > 1)
                     throw new ArgumentException(
                         "The query is resulting in a format, which is not supported by this method yet");
 
                 if (rawResult?.Results[0]?.Series != null)
-                {
                     foreach (var series in rawResult?.Results[0]?.Series)
                     {
-                        InfluxSeries result = GetInfluxSeries(precision, series, partialResult);
+                        var result = GetInfluxSeries(precision, series, partialResult);
                         results.Add(result);
                     }
+
+                return results;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        ///     Queries Influx DB and gets a time series data back. Ideal for fetching measurement values.
+        ///     The return list is of InfluxSeries, and each element in there will have properties named after columns in series
+        ///     THis uses Chunking support from InfluxDB. It returns results in streamed batches rather than as a single response
+        ///     Responses will be chunked by series or by every ChunkSize points, whichever occurs first.
+        /// </summary>
+        /// <param name="dbName">Name of the database</param>
+        /// <param name="measurementQuery">Query text, Only results with single series are supported for now</param>
+        /// <param name="ChunkSize">Maximum Number of points in a chunk</param>
+        /// <param name="precision">epoch precision of the data set</param>
+        /// <returns>List of InfluxSeries</returns>
+        /// <seealso cref="InfluxSeries" />
+        public async Task<List<IInfluxSeries>> QueryMultiSeriesAsync(string dbName, string measurementQuery,
+            int ChunkSize, string retentionPolicy = null, TimePrecision precision = TimePrecision.Nanoseconds)
+        {
+            var endPoint = new Dictionary<string, string>
+            {
+                {"db", dbName},
+                {"q", measurementQuery},
+                {"chunked", "true"},
+                {"chunk_size", ChunkSize.ToString()},
+                {"epoch", precisionLiterals[(int) precision]}
+            };
+            if (retentionPolicy != null) endPoint.Add("rp", retentionPolicy);
+
+            var response = await GetAsync(endPoint, HttpCompletionOption.ResponseHeadersRead);
+            if (response == null) throw new ServiceUnavailableException();
+            if (response.StatusCode == HttpStatusCode.OK)
+            {
+                var results = new List<IInfluxSeries>();
+
+                var stream = await response.Content.ReadAsStreamAsync();
+
+                using (var reader = new StreamReader(stream))
+                {
+                    do
+                    {
+                        var str = await reader.ReadLineAsync();
+                        var rawResult = JsonConvert.DeserializeObject<InfluxResponse>(str);
+                        var partialResult = rawResult?.Results?.Any(r => r.Partial);
+                        if (rawResult?.Results[0]?.Series != null)
+                            foreach (var series in rawResult?.Results[0]?.Series)
+                            {
+                                var result = GetInfluxSeries(precision, series, partialResult);
+                                results.Add(result);
+                            }
+
+                        if (!rawResult.Results[0].Partial) break;
+                    } while (!reader.EndOfStream);
                 }
 
                 return results;
@@ -880,24 +567,254 @@ namespace AdysTech.InfluxDB.Client.Net
         }
 
         /// <summary>
-        /// Queries Influx DB and gets a time series data back. Ideal for fetching measurement values.
-        /// The return list is of InfluxSeries, and each element in there will have properties named after columns in series
+        ///     Queries Influx DB and gets a time series data back. Ideal for fetching measurement values.
+        ///     The return list is of T objects, and each element in there will have values deserialized assuming correct attribute
+        ///     usage
+        /// </summary>
+        /// <param name="dbName">Name of the database</param>
+        /// <param name="measurementQuery">Query text, Supports multi series results</param>
+        /// <param name="retentionPolicy">retention policy containing the measurement</param>
+        /// <param name="precision">epoch precision of the data set</param>
+        /// <returns>List of InfluxSeries<T></returns>
+        public async Task<List<IInfluxSeries<T>>> QueryMultiSeriesAsync<T>(string dbName, string measurementQuery,
+            string retentionPolicy = null, TimePrecision precision = TimePrecision.Nanoseconds)
+        {
+            return (await QueryMultiSeriesAsync(dbName, measurementQuery, retentionPolicy, precision))
+                .Select(series =>
+                    new InfluxSeries<T>
+                    {
+                        SeriesName = series.SeriesName,
+                        Tags = series.Tags,
+                        HasEntries = series.HasEntries,
+                        Partial = series.Partial,
+                        Entries = series.Entries.Select(FromInfluxDataPoint<T>).ToList().AsReadOnly()
+                    } as IInfluxSeries<T>)
+                .ToList();
+        }
+
+        /// <summary>
+        ///     Queries Influx DB and gets a time series data back. Ideal for fetching measurement values.
+        ///     The return list is of T objects, and each element in there will have values deserialized assuming correct attribute
+        ///     usage
+        ///     THis uses Chunking support from InfluxDB. It returns results in streamed batches rather than as a single response
+        ///     Responses will be chunked by series or by every ChunkSize points, whichever occurs first.
+        /// </summary>
+        /// <param name="dbName">Name of the database</param>
+        /// <param name="measurementQuery">Query text, Only results with single series are supported for now</param>
+        /// <param name="ChunkSize">Maximum Number of points in a chunk</param>
+        /// <param name="retentionPolicy">retention policy containing the measurement</param>
+        /// <param name="precision">epoch precision of the data set</param>
+        /// <returns>List of InfluxSeries<T></returns>
+        /// <seealso cref="InfluxSeries" />
+        public async Task<List<IInfluxSeries<T>>> QueryMultiSeriesAsync<T>(string dbName, string measurementQuery,
+            int ChunkSize, string retentionPolicy = null, TimePrecision precision = TimePrecision.Nanoseconds)
+        {
+            return (await QueryMultiSeriesAsync(dbName, measurementQuery, ChunkSize, retentionPolicy, precision))
+                .Select(series =>
+                    new InfluxSeries<T>
+                    {
+                        SeriesName = series.SeriesName,
+                        Tags = series.Tags,
+                        HasEntries = series.HasEntries,
+                        Partial = series.Partial,
+                        Entries = series.Entries.Select(FromInfluxDataPoint<T>).ToList().AsReadOnly()
+                    } as IInfluxSeries<T>)
+                .ToList();
+        }
+
+        /// <summary>
+        ///     Gets the list of Continuous Queries currently in efect
+        /// </summary>
+        /// <returns>List of InfluxContinuousQuery objects</returns>
+        public async Task<List<IInfluxContinuousQuery>> GetContinuousQueriesAsync()
+        {
+            var cqPattern =
+                new Regex(
+                    @"^CREATE CONTINUOUS QUERY (\S*) ON (\S*) (RESAMPLE (EVERY (\d\S)*)? ?(FOR (\d\S)*)?)? ?BEGIN ([\s\S]*GROUP BY time\((\d\S)\)[\s\S]*) END",
+                    RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromSeconds(10));
+            //Show Continous Queries runs at a global scope, not just for a given DB.
+            var rawCQList = await QueryMultiSeriesAsync(null, "SHOW CONTINUOUS QUERIES");
+            var queries = new List<IInfluxContinuousQuery>();
+
+            foreach (var dbEntry in rawCQList.Where(cq => cq.HasEntries))
+            foreach (var rawCQ in dbEntry.Entries)
+            {
+                var cq = new InfluxContinuousQuery
+                {
+                    DBName = dbEntry.SeriesName,
+                    Name = rawCQ.Name,
+                    Saved = true
+                };
+                Match queryParts;
+                try
+                {
+                    queryParts = cqPattern.Match(rawCQ.Query);
+                    cq.ResampleFrequency = queryParts.Groups[5].ToString().ParseDuration();
+                    cq.ResampleDuration = queryParts.Groups[7].ToString().ParseDuration();
+                    cq.Query = queryParts.Groups[8].ToString();
+                    cq.GroupByInterval = queryParts.Groups[9].ToString().ParseDuration();
+                }
+#pragma warning disable CS0168 // The variable 'e' is declared but never used
+                catch (Exception e)
+#pragma warning restore CS0168 // The variable 'e' is declared but never used
+                {
+                    string query = rawCQ.Query.ToString();
+                    var begin = query.IndexOf("BEGIN", StringComparison.CurrentCultureIgnoreCase) + 5;
+                    cq.Query = query.Substring(begin,
+                        query.IndexOf(" END", StringComparison.CurrentCultureIgnoreCase));
+                }
+
+                queries.Add(cq);
+            }
+
+            return queries;
+        }
+
+        /// <summary>
+        ///     Creates a Continuous Queries
+        /// </summary>
+        /// <param name="cq">An instance of the Continuous Query, DBName, Name, Query must be set</param>
+        /// <returns>True: Success</returns>
+        public async Task<bool> CreateContinuousQueryAsync(IInfluxContinuousQuery cq)
+        {
+            var query = (cq as InfluxContinuousQuery).GetCreateSyntax();
+            if (query != null)
+            {
+                var response = await GetAsync(new Dictionary<string, string> {{"q", query}});
+                if (response.StatusCode == HttpStatusCode.OK)
+                {
+                    (cq as InfluxContinuousQuery).Saved = true;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        ///     Drops a Continuous Queries
+        /// </summary>
+        /// <param name="cq">An instance of the Continuous Query, must be saved already</param>
+        /// <returns>True: Success</returns>
+        public async Task<bool> DropContinuousQueryAsync(IInfluxContinuousQuery cq)
+        {
+            if (!cq.Saved)
+                throw new ArgumentException("Continuous Query is not saved");
+            var query = (cq as InfluxContinuousQuery).GetDropSyntax();
+            if (query != null)
+            {
+                var response = await GetAsync(new Dictionary<string, string> {{"q", query}});
+                if (response.StatusCode == HttpStatusCode.OK)
+                {
+                    (cq as InfluxContinuousQuery).Saved = false;
+                    (cq as InfluxContinuousQuery).Deleted = true;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        ///     Drops a Continuous InfluxDatabase
+        /// </summary>
+        /// <param name="db">An instance of InfluxDatabase</param>
+        /// <returns>True: Success</returns>
+        public async Task<bool> DropDatabaseAsync(IInfluxDatabase db)
+        {
+            var query = (db as InfluxDatabase).GetDropSyntax();
+            if (query != null)
+            {
+                var response = await GetAsync(new Dictionary<string, string> {{"q", query}});
+                if (response.StatusCode == HttpStatusCode.OK)
+                {
+                    (db as InfluxDatabase).Deleted = true;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        ///     Drops a InfluxMeasurement for a given retention policy
+        /// </summary>
+        /// <param name="im">An instance of IInfluxMeasurement</param>
+        /// <param name="rp">An instance of IInfluxRetentionPolicy, optional</param>
+        /// <returns>True: Success</returns>
+        public async Task<bool> DropMeasurementAsync(IInfluxDatabase db, IInfluxMeasurement im,
+            IInfluxRetentionPolicy rp = null)
+        {
+            var query = (im as InfluxMeasurement).GetDropSyntax();
+            if (query != null)
+            {
+                var endPoint = new Dictionary<string, string> {{"db", db.Name}, {"q", query}};
+                if (rp != null) endPoint.Add("rp", rp.Name);
+
+                var response = await GetAsync(endPoint);
+                if (response.StatusCode == HttpStatusCode.OK)
+                {
+                    var content = await response.Content.ReadAsStringAsync();
+                    if (content.Contains("error"))
+                        throw new InfluxDBException("Drop Failed",
+                            new Regex(@"\""error\"":\""(.*?)\""").Match(content).Groups[1].Value);
+
+                    (im as InfluxMeasurement).Deleted = true;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+
+        /// <summary>
+        ///     Drops a Continuous Queries
+        /// </summary>
+        /// <param name="im">An instance of IInfluxMeasurement</param>
+        /// <param name="rp">An instance of IInfluxRetentionPolicy, optional</param>
+        /// <param name="whereClause"> key value pair defining the where clause to restrict deletion</param>
+        /// <returns>True: Success</returns>
+        public async Task<bool> DeletePointsAsync(IInfluxDatabase db, IInfluxMeasurement im,
+            IInfluxRetentionPolicy rp = null, IList<string> whereClause = null)
+        {
+            var query = (im as InfluxMeasurement).GetDeleteSyntax(rp, whereClause);
+            if (query != null)
+            {
+                var endPoint = new Dictionary<string, string> {{"db", db.Name}, {"q", query}};
+                if (rp != null) endPoint.Add("rp", rp.Name);
+
+                var response = await GetAsync(endPoint);
+                if (response.StatusCode == HttpStatusCode.OK)
+                {
+                    var content = await response.Content.ReadAsStringAsync();
+                    if (content.Contains("error"))
+                        throw new InfluxDBException("Delete Failed",
+                            new Regex(@"\""error\"":\""(.*?)\""").Match(content).Groups[1].Value);
+
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        ///     Queries Influx DB and gets a time series data back. Ideal for fetching measurement values.
+        ///     The return list is of InfluxSeries, and each element in there will have properties named after columns in series
         /// </summary>
         /// <param name="dbName">Name of the database</param>
         /// <param name="measurementQuery">Query text, Only results with single series are supported for now</param>
         /// <param name="precision">epoch precision of the data set</param>
         /// <returns>List of InfluxSeriesDict</returns>
-        /// <seealso cref="InfluxSeries"/>
+        /// <seealso cref="InfluxSeries" />
         public async Task<List<IInfluxSeriesDict>> QueryMultiSeriesAsDictAsync(string dbName, string measurementQuery,
             string retentionPolicy = null, TimePrecision precision = TimePrecision.Nanoseconds)
         {
-            var endPoint = new Dictionary<string, string>()
+            var endPoint = new Dictionary<string, string>
                 {{"db", dbName}, {"q", measurementQuery}, {"epoch", precisionLiterals[(int) precision]}};
 
-            if (retentionPolicy != null)
-            {
-                endPoint.Add("rp", retentionPolicy);
-            }
+            if (retentionPolicy != null) endPoint.Add("rp", retentionPolicy);
 
             var response = await GetAsync(endPoint, HttpCompletionOption.ResponseHeadersRead);
 
@@ -907,20 +824,18 @@ namespace AdysTech.InfluxDB.Client.Net
                 var results = new List<IInfluxSeriesDict>();
                 var rawResult =
                     JsonConvert.DeserializeObject<InfluxResponse>(await response.Content.ReadAsStringAsync());
-                var partialResult = rawResult.Results?.Any(r => r.Partial == true);
+                var partialResult = rawResult.Results?.Any(r => r.Partial);
 
                 if (rawResult?.Results?.Count > 1)
                     throw new ArgumentException(
                         "The query is resulting in a format, which is not supported by this method yet");
 
                 if (rawResult?.Results[0]?.Series != null)
-                {
                     foreach (var series in rawResult?.Results[0]?.Series)
                     {
-                        InfluxSeriesDict result = GetInfluxSeriesDict(precision, series, partialResult);
+                        var result = GetInfluxSeriesDict(precision, series, partialResult);
                         results.Add(result);
                     }
-                }
 
                 return results;
             }
@@ -929,40 +844,38 @@ namespace AdysTech.InfluxDB.Client.Net
         }
 
         /// <summary>
-        /// Queries Influx DB and gets multiple time series data back. Ideal for fetching measurement values.
-        /// The return list is of InfluxResult, that contains multiple InfluxSeries and each element in there will have properties named after columns in series.
+        ///     Queries Influx DB and gets multiple time series data back. Ideal for fetching measurement values.
+        ///     The return list is of InfluxResult, that contains multiple InfluxSeries and each element in there will have
+        ///     properties named after columns in series.
         /// </summary>
         /// <param name="dbName">Name of the database</param>
         /// <param name="measurementQuery">Query text, Only results with single series are supported for now</param>
         /// <param name="precision">epoch precision of the data set</param>
         /// <returns>List of InfluxResult that contains multiple InfluxSeries.</returns>
-        /// <seealso cref="InfluxResult"/>
+        /// <seealso cref="InfluxResult" />
         public async Task<List<InfluxResultDict>> QueryMultiSeriesMultiResultAsDictAsync(string dbName,
             string measurementQuery, string retentionPolicy = null, TimePrecision precision = TimePrecision.Nanoseconds)
         {
-            var endPoint = new Dictionary<string, string>()
+            var endPoint = new Dictionary<string, string>
                 {{"db", dbName}, {"epoch", precisionLiterals[(int) precision]}};
 
-            if (retentionPolicy != null)
-            {
-                endPoint.Add("rp", retentionPolicy);
-            }
+            if (retentionPolicy != null) endPoint.Add("rp", retentionPolicy);
 
             var response = await PostQueryAsync(endPoint, measurementQuery);
 
             if (response == null) throw new ServiceUnavailableException();
             if (response.StatusCode != HttpStatusCode.OK)
-            {
                 throw new Exception($"InfluxDB returned status code {response.StatusCode}: " +
                                     $"{await response.Content.ReadAsStringAsync()}");
-            }
 
             var multiResult = new List<InfluxResultDict>();
             var serializer = new JsonSerializer();
             InfluxResponse rawResult;
             using (var sr = new StreamReader(await response.Content.ReadAsStreamAsync()))
             using (var rdr = new JsonTextReader(sr))
+            {
                 rawResult = serializer.Deserialize<InfluxResponse>(rdr);
+            }
 
             var partialResult = rawResult.Results?.Any(r => r.Partial);
 
@@ -988,130 +901,22 @@ namespace AdysTech.InfluxDB.Client.Net
             return multiResult;
         }
 
-        /// <summary>
-        /// Queries Influx DB and gets a time series data back. Ideal for fetching measurement values.
-        /// The return list is of InfluxSeries, and each element in there will have properties named after columns in series
-        /// THis uses Chunking support from InfluxDB. It returns results in streamed batches rather than as a single response
-        /// Responses will be chunked by series or by every ChunkSize points, whichever occurs first.
-        /// </summary>
-        /// <param name="dbName">Name of the database</param>
-        /// <param name="measurementQuery">Query text, Only results with single series are supported for now</param>
-        /// <param name="ChunkSize">Maximum Number of points in a chunk</param>
-        /// <param name="precision">epoch precision of the data set</param>
-        /// <returns>List of InfluxSeries</returns>
-        /// <seealso cref="InfluxSeries"/>
-        public async Task<List<IInfluxSeries>> QueryMultiSeriesAsync(string dbName, string measurementQuery,
-            int ChunkSize, string retentionPolicy = null, TimePrecision precision = TimePrecision.Nanoseconds)
-        {
-            var endPoint = new Dictionary<string, string>()
-            {
-                {"db", dbName},
-                {"q", measurementQuery},
-                {"chunked", "true"},
-                {"chunk_size", ChunkSize.ToString()},
-                {"epoch", precisionLiterals[(int) precision]}
-            };
-            if (retentionPolicy != null)
-            {
-                endPoint.Add("rp", retentionPolicy);
-            }
-
-            var response = await GetAsync(endPoint, HttpCompletionOption.ResponseHeadersRead);
-            if (response == null) throw new ServiceUnavailableException();
-            if (response.StatusCode == HttpStatusCode.OK)
-            {
-                var results = new List<IInfluxSeries>();
-
-                var stream = await response.Content.ReadAsStreamAsync();
-
-                using (var reader = new StreamReader(stream))
-                {
-                    do
-                    {
-                        var str = await reader.ReadLineAsync();
-                        var rawResult = JsonConvert.DeserializeObject<InfluxResponse>(str);
-                        var partialResult = rawResult?.Results?.Any(r => r.Partial == true);
-                        if (rawResult?.Results[0]?.Series != null)
-                        {
-                            foreach (var series in rawResult?.Results[0]?.Series)
-                            {
-                                InfluxSeries result = GetInfluxSeries(precision, series, partialResult);
-                                results.Add(result);
-                            }
-                        }
-
-                        if (!rawResult.Results[0].Partial) break;
-                    } while (!reader.EndOfStream);
-                }
-
-                return results;
-            }
-
-            return null;
-        }
 
         /// <summary>
-        /// Queries Influx DB and gets a time series data back. Ideal for fetching measurement values.
-        /// The return list is of T objects, and each element in there will have values deserialized assuming correct attribute usage
-        /// </summary>
-        /// <param name="dbName">Name of the database</param>
-        /// <param name="measurementQuery">Query text, Supports multi series results</param>
-        /// <param name="retentionPolicy">retention policy containing the measurement</param>
-        /// <param name="precision">epoch precision of the data set</param>
-        /// <returns>List of InfluxSeries<T></returns>
-        public async Task<List<IInfluxSeries<T>>> QueryMultiSeriesAsync<T>(string dbName, string measurementQuery, string retentionPolicy = null, TimePrecision precision = TimePrecision.Nanoseconds)
-            => (await QueryMultiSeriesAsync(dbName, measurementQuery, retentionPolicy, precision))
-                .Select(series =>
-                    new InfluxSeries<T>
-                    {
-                        SeriesName = series.SeriesName,
-                        Tags = series.Tags,
-                        HasEntries = series.HasEntries,
-                        Partial = series.Partial,
-                        Entries = series.Entries.Select(FromInfluxDataPoint<T>).ToList().AsReadOnly(),
-                    } as IInfluxSeries<T>)
-                .ToList();
-
-        /// <summary>
-        /// Queries Influx DB and gets a time series data back. Ideal for fetching measurement values.
-        /// The return list is of T objects, and each element in there will have values deserialized assuming correct attribute usage
-        /// THis uses Chunking support from InfluxDB. It returns results in streamed batches rather than as a single response
-        /// Responses will be chunked by series or by every ChunkSize points, whichever occurs first.
-        /// </summary>
-        /// <param name="dbName">Name of the database</param>
-        /// <param name="measurementQuery">Query text, Only results with single series are supported for now</param>
-        /// <param name="ChunkSize">Maximum Number of points in a chunk</param>
-        /// <param name="retentionPolicy">retention policy containing the measurement</param>
-        /// <param name="precision">epoch precision of the data set</param>
-        /// <returns>List of InfluxSeries<T></returns>
-        /// <seealso cref="InfluxSeries"/>
-
-        public async Task<List<IInfluxSeries<T>>> QueryMultiSeriesAsync<T>(string dbName, string measurementQuery, int ChunkSize, string retentionPolicy = null, TimePrecision precision = TimePrecision.Nanoseconds)
-            => (await QueryMultiSeriesAsync(dbName, measurementQuery, ChunkSize, retentionPolicy, precision))
-                .Select(series =>
-                    new InfluxSeries<T>
-                    {
-                        SeriesName = series.SeriesName,
-                        Tags = series.Tags,
-                        HasEntries = series.HasEntries,
-                        Partial = series.Partial,
-                        Entries = series.Entries.Select(FromInfluxDataPoint<T>).ToList().AsReadOnly(),
-                    } as IInfluxSeries<T>)
-                .ToList();
-
-
-        /// <summary>
-        /// Convert the Influx Series JSON objects to InfluxSeries
+        ///     Convert the Influx Series JSON objects to InfluxSeries
         /// </summary>
         /// <param name="precision"></param>
         /// <param name="series"></param>
         /// <param name="partialResult"></param>
-        /// <param name="SafePropertyNames">If true the first letter of each property name will be Capital, making them safer to use in C#</param>
+        /// <param name="SafePropertyNames">
+        ///     If true the first letter of each property name will be Capital, making them safer to
+        ///     use in C#
+        /// </param>
         /// <returns></returns>
         private static InfluxSeries GetInfluxSeries(TimePrecision precision, Series series, bool? partialResult,
             bool SafePropertyNames = true)
         {
-            var result = new InfluxSeries()
+            var result = new InfluxSeries
             {
                 HasEntries = false
             };
@@ -1133,9 +938,9 @@ namespace AdysTech.InfluxDB.Client.Net
                         header = char.ToUpper(series.Columns[col][0]) + series.Columns[col].Substring(1);
                     else
                         header = series.Columns[col];
-                    if (String.Equals(header, "Time", StringComparison.OrdinalIgnoreCase))
+                    if (string.Equals(header, "Time", StringComparison.OrdinalIgnoreCase))
                         ((IDictionary<string, object>) entry).Add(header,
-                            EpochHelper.FromEpoch(series.Values[row][col], precision));
+                            series.Values[row][col].FromEpoch(precision));
                     else
                         ((IDictionary<string, object>) entry).Add(header, series.Values[row][col]);
                 }
@@ -1146,7 +951,7 @@ namespace AdysTech.InfluxDB.Client.Net
         }
 
         /// <summary>
-        /// Convert the Influx Series JSON objects to InfluxSeries
+        ///     Convert the Influx Series JSON objects to InfluxSeries
         /// </summary>
         /// <param name="precision"></param>
         /// <param name="series"></param>
@@ -1184,206 +989,388 @@ namespace AdysTech.InfluxDB.Client.Net
             return result;
         }
 
-        /// <summary>
-        /// Gets the list of Continuous Queries currently in efect
-        /// </summary>
-        /// <returns>List of InfluxContinuousQuery objects</returns>
-        public async Task<List<IInfluxContinuousQuery>> GetContinuousQueriesAsync()
-        {
-            var cqPattern =
-                new Regex(
-                    @"^CREATE CONTINUOUS QUERY (\S*) ON (\S*) (RESAMPLE (EVERY (\d\S)*)? ?(FOR (\d\S)*)?)? ?BEGIN ([\s\S]*GROUP BY time\((\d\S)\)[\s\S]*) END",
-                    RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromSeconds(10));
-            //Show Continous Queries runs at a global scope, not just for a given DB.
-            var rawCQList = await QueryMultiSeriesAsync(null, "SHOW CONTINUOUS QUERIES");
-            var queries = new List<IInfluxContinuousQuery>();
-
-            foreach (var dbEntry in rawCQList.Where(cq => cq.HasEntries == true))
-            {
-                foreach (var rawCQ in dbEntry.Entries)
-                {
-                    var cq = new InfluxContinuousQuery()
-                    {
-                        DBName = dbEntry.SeriesName,
-                        Name = rawCQ.Name,
-                        Saved = true
-                    };
-                    Match queryParts;
-                    try
-                    {
-                        queryParts = cqPattern.Match(rawCQ.Query);
-                        cq.ResampleFrequency = StringHelper.ParseDuration(queryParts.Groups[5].ToString());
-                        cq.ResampleDuration = StringHelper.ParseDuration(queryParts.Groups[7].ToString());
-                        cq.Query = queryParts.Groups[8].ToString();
-                        cq.GroupByInterval = StringHelper.ParseDuration(queryParts.Groups[9].ToString());
-                    }
-#pragma warning disable CS0168 // The variable 'e' is declared but never used
-                    catch (Exception e)
-#pragma warning restore CS0168 // The variable 'e' is declared but never used
-                    {
-                        string query = rawCQ.Query.ToString();
-                        var begin = query.IndexOf("BEGIN", StringComparison.CurrentCultureIgnoreCase) + 5;
-                        cq.Query = query.Substring(begin,
-                            query.IndexOf(" END", StringComparison.CurrentCultureIgnoreCase));
-                    }
-
-                    queries.Add(cq);
-                }
-            }
-
-            return queries;
-        }
-
-        /// <summary>
-        /// Creates a Continuous Queries
-        /// </summary>
-        /// <param name="cq">An instance of the Continuous Query, DBName, Name, Query must be set</param>
-        /// <returns>True: Success</returns>
-        public async Task<bool> CreateContinuousQueryAsync(IInfluxContinuousQuery cq)
-        {
-            var query = (cq as InfluxContinuousQuery).GetCreateSyntax();
-            if (query != null)
-            {
-                var response = await GetAsync(new Dictionary<string, string>() {{"q", query}});
-                if (response.StatusCode == HttpStatusCode.OK)
-                {
-                    (cq as InfluxContinuousQuery).Saved = true;
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        /// <summary>
-        /// Drops a Continuous Queries
-        /// </summary>
-        /// <param name="cq">An instance of the Continuous Query, must be saved already</param>
-        /// <returns>True: Success</returns>
-        public async Task<bool> DropContinuousQueryAsync(IInfluxContinuousQuery cq)
-        {
-            if (!cq.Saved)
-                throw new ArgumentException("Continuous Query is not saved");
-            var query = (cq as InfluxContinuousQuery).GetDropSyntax();
-            if (query != null)
-            {
-                var response = await GetAsync(new Dictionary<string, string>() {{"q", query}});
-                if (response.StatusCode == HttpStatusCode.OK)
-                {
-                    (cq as InfluxContinuousQuery).Saved = false;
-                    (cq as InfluxContinuousQuery).Deleted = true;
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        /// <summary>
-        /// Drops a Continuous InfluxDatabase
-        /// </summary>
-        /// <param name="db">An instance of InfluxDatabase</param>
-        /// <returns>True: Success</returns>
-        public async Task<bool> DropDatabaseAsync(IInfluxDatabase db)
-        {
-            var query = (db as InfluxDatabase).GetDropSyntax();
-            if (query != null)
-            {
-                var response = await GetAsync(new Dictionary<string, string>() {{"q", query}});
-                if (response.StatusCode == HttpStatusCode.OK)
-                {
-                    (db as InfluxDatabase).Deleted = true;
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        /// <summary>
-        /// Drops a InfluxMeasurement for a given retention policy
-        /// </summary>
-        /// <param name="im">An instance of IInfluxMeasurement</param>
-        /// <param name="rp">An instance of IInfluxRetentionPolicy, optional</param>
-        /// <returns>True: Success</returns>
-        public async Task<bool> DropMeasurementAsync(IInfluxDatabase db, IInfluxMeasurement im,
-            IInfluxRetentionPolicy rp = null)
-        {
-            var query = (im as InfluxMeasurement).GetDropSyntax();
-            if (query != null)
-            {
-                var endPoint = new Dictionary<string, string>() {{"db", db.Name}, {"q", query}};
-                if (rp != null)
-                {
-                    endPoint.Add("rp", rp.Name);
-                }
-
-                var response = await GetAsync(endPoint);
-                if (response.StatusCode == HttpStatusCode.OK)
-                {
-                    var content = await response.Content.ReadAsStringAsync();
-                    if (content.Contains("error"))
-                    {
-                        throw new InfluxDBException("Drop Failed",
-                            new Regex(@"\""error\"":\""(.*?)\""").Match(content).Groups[1].Value);
-                    }
-
-                    (im as InfluxMeasurement).Deleted = true;
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-
-        /// <summary>
-        /// Drops a Continuous Queries
-        /// </summary>
-        /// <param name="im">An instance of IInfluxMeasurement</param>
-        /// <param name="rp">An instance of IInfluxRetentionPolicy, optional</param>
-        /// <param name="whereClause"> key value pair defining the where clause to restrict deletion</param>
-        /// <returns>True: Success</returns>
-        public async Task<bool> DeletePointsAsync(IInfluxDatabase db, IInfluxMeasurement im,
-            IInfluxRetentionPolicy rp = null, IList<string> whereClause = null)
-        {
-            var query = (im as InfluxMeasurement).GetDeleteSyntax(rp, whereClause);
-            if (query != null)
-            {
-                var endPoint = new Dictionary<string, string>() {{"db", db.Name}, {"q", query}};
-                if (rp != null)
-                {
-                    endPoint.Add("rp", rp.Name);
-                }
-
-                var response = await GetAsync(endPoint);
-                if (response.StatusCode == HttpStatusCode.OK)
-                {
-                    var content = await response.Content.ReadAsStringAsync();
-                    if (content.Contains("error"))
-                    {
-                        throw new InfluxDBException("Delete Failed",
-                            new Regex(@"\""error\"":\""(.*?)\""").Match(content).Groups[1].Value);
-                    }
-
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        public void Dispose()
-        {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-
         // The bulk of the clean-up code is implemented in Dispose(bool)
         protected virtual void Dispose(bool disposing)
         {
             _client?.Dispose();
             _client = null;
         }
+
+        #region fields
+
+        private readonly string[] precisionLiterals = {"_", "h", "m", "s", "ms", "u", "n"};
+        private HttpClient _client;
+
+        #endregion fields
+
+        #region private methods
+
+        private async Task<HttpResponseMessage> GetAsync(Dictionary<string, string> Query,
+            HttpCompletionOption completion = HttpCompletionOption.ResponseContentRead)
+        {
+            var querybaseUrl = new Uri(InfluxUrl);
+            var builder = new UriBuilder(querybaseUrl);
+            builder.Path += "query";
+            builder.Query = await new FormUrlEncodedContent(Query).ReadAsStringAsync();
+            try
+            {
+                var response = await _client.GetAsync(builder.Uri, completion);
+
+                LogResponse(response);
+
+                if (response.StatusCode == HttpStatusCode.OK)
+                    return response;
+                if (response.StatusCode == HttpStatusCode.Unauthorized
+                    || response.StatusCode == HttpStatusCode.InternalServerError &&
+                    response.ReasonPhrase == "INKApi Error"
+                    || response.StatusCode == HttpStatusCode.Forbidden
+                    || response.StatusCode == HttpStatusCode.BadGateway
+                    || response.StatusCode == HttpStatusCode.ProxyAuthenticationRequired
+                    || (int) response.StatusCode == 511) //511 NetworkAuthenticationRequired
+                    throw new UnauthorizedAccessException("InfluxDB needs authentication. Check uname, pwd parameters");
+                if (response.StatusCode == HttpStatusCode.BadGateway ||
+                    response.StatusCode == HttpStatusCode.GatewayTimeout)
+                    throw new ServiceUnavailableException(await response.Content.ReadAsStringAsync());
+                if (response.StatusCode == HttpStatusCode.BadRequest)
+                    throw InfluxDBException.ProcessInfluxDBError(await response.Content.ReadAsStringAsync());
+            }
+            catch (HttpRequestException e)
+            {
+                if (e.InnerException.Message == "Unable to connect to the remote server" ||
+                    e.InnerException.Message == "A connection with the server could not be established" ||
+                    e.InnerException.Message.StartsWith("The remote name could not be resolved:"))
+                    throw new ServiceUnavailableException();
+
+                throw;
+            }
+
+            return null;
+        }
+
+        public TimeSpan GetInfluxClientTimeout()
+        {
+            return _client.Timeout;
+        }
+
+        private async Task<HttpResponseMessage> PostQueryAsync(Dictionary<string, string> EndPoint, string query)
+        {
+            var querybaseUrl = new Uri(InfluxUrl);
+            var builder = new UriBuilder(querybaseUrl);
+            builder.Path += "query";
+
+            builder.Query = await new FormUrlEncodedContent(EndPoint).ReadAsStringAsync();
+
+            try
+            {
+                var body = new StringContent($"q={WebUtility.UrlEncode(query)}", Encoding.UTF8,
+                    "application/x-www-form-urlencoded");
+
+                var request = new HttpRequestMessage(HttpMethod.Post, builder.Uri);
+                request.Content = body;
+
+                LogHttpHeader(body.Headers);
+
+                var response = _client.SendAsync(request).Result;
+
+                LogResponse(response);
+
+                if (response.StatusCode == HttpStatusCode.Unauthorized ||
+                    response.StatusCode == HttpStatusCode.BadGateway ||
+                    response.StatusCode == HttpStatusCode.InternalServerError &&
+                    response.ReasonPhrase == "INKApi Error") //502 Connection refused
+                    throw new UnauthorizedAccessException("InfluxDB needs authentication. Check uname, pwd parameters");
+
+                return response;
+            }
+            catch (HttpRequestException e)
+            {
+                if (e.InnerException.Message == "Unable to connect to the remote server")
+                    throw new ServiceUnavailableException();
+
+                throw;
+            }
+        }
+
+        private async Task<HttpResponseMessage> PostAsync(Dictionary<string, string> EndPoint, byte[] requestContent)
+        {
+            var querybaseUrl = new Uri(InfluxUrl);
+            var builder = new UriBuilder(querybaseUrl);
+            builder.Path += "write";
+
+            builder.Query = await new FormUrlEncodedContent(EndPoint).ReadAsStringAsync();
+            //if (requestContent.Headers.ContentType == null)
+            //{
+            //    requestContent.Headers.ContentType = new MediaTypeHeaderValue("application/x-www-form-urlencoded");
+            //    requestContent.Headers.ContentType.CharSet = "UTF-8";
+            //}
+
+            try
+            {
+                using (var outStream = new MemoryStream())
+                {
+                    using (var gZipStream = new GZipStream(outStream, CompressionMode.Compress, true))
+                    {
+                        using (var byeteArrayStream = new MemoryStream(requestContent))
+                        {
+                            await byeteArrayStream.CopyToAsync(gZipStream);
+                        }
+                    }
+
+                    var zippedByteArrayContent = new ByteArrayContent(outStream.ToArray());
+                    zippedByteArrayContent.Headers.ContentEncoding.Add("gzip");
+
+                    LogHttpHeader(zippedByteArrayContent.Headers);
+
+                    var response = await _client.PostAsync(builder.Uri, zippedByteArrayContent);
+
+                    LogResponse(response);
+
+                    if (response.StatusCode == HttpStatusCode.Unauthorized
+                        || response.StatusCode == HttpStatusCode.InternalServerError &&
+                        response.ReasonPhrase == "INKApi Error"
+                        || response.StatusCode == HttpStatusCode.Forbidden
+                        || response.StatusCode == HttpStatusCode.BadGateway
+                        || response.StatusCode == HttpStatusCode.ProxyAuthenticationRequired
+                        || (int) response.StatusCode == 511) //511 NetworkAuthenticationRequired
+                        throw new UnauthorizedAccessException(
+                            "InfluxDB needs authentication. Check uname, pwd parameters");
+                    if (response.StatusCode == HttpStatusCode.BadGateway ||
+                        response.StatusCode == HttpStatusCode.GatewayTimeout)
+                        throw new ServiceUnavailableException(await response.Content.ReadAsStringAsync());
+                    if (response.StatusCode == HttpStatusCode.BadRequest)
+                        throw InfluxDBException.ProcessInfluxDBError(await response.Content.ReadAsStringAsync());
+
+                    return response;
+                }
+            }
+            catch (HttpRequestException e)
+            {
+                if (e.InnerException.Message == "Unable to connect to the remote server")
+                    throw new ServiceUnavailableException();
+
+                throw;
+            }
+        }
+
+        private void LogHttpHeader(HttpContentHeaders headers)
+        {
+            _logger?.LogDebug("------------- HTTP Request Header ----------------");
+            foreach (var httpContentHeader in headers)
+                _logger?.LogDebug("Key: " + httpContentHeader.Key + ", Value: " + httpContentHeader.Value);
+            _logger?.LogDebug("------------- HTTP Request Header end ----------------");
+        }
+
+        private void LogResponse(HttpResponseMessage response)
+        {
+            _logger?.LogDebug("------------- HTTP Response Header ----------------");
+            _logger?.LogDebug("Status code: " + response.StatusCode);
+            foreach (var httpResponseHeader in response.Headers)
+                _logger?.LogDebug("Key: " + httpResponseHeader.Key + ", Value: " + httpResponseHeader.Value);
+            _logger?.LogDebug("------------- HTTP Response Header end ----------------");
+        }
+
+        private async Task<bool> PostPointsAsync(string dbName, TimePrecision precision, string retention,
+            IEnumerable<IInfluxDatapoint> points)
+        {
+            var multiLinePattern = new Regex(@"([\P{Cc}].*?) '([\P{Cc}].*?)':([\P{Cc}].*?)\\n", RegexOptions.Compiled,
+                TimeSpan.FromSeconds(5));
+            var oneLinePattern = new Regex(@"{\""error"":""([9\P{Cc}]+) '([\P{Cc}]+)':([a-zA-Z0-9 ]+)",
+                RegexOptions.Compiled, TimeSpan.FromSeconds(5));
+
+            //allocate minimum of 128 bytes per point, reducing future allocation and resize costs
+            var line = new StringBuilder(points.Count() * 128);
+            foreach (var point in points)
+            {
+                point.ConvertToInfluxLineProtocol(line);
+                line.Append("\n");
+            }
+
+            //remove last \n
+            line.Remove(line.Length - 1, 1);
+
+            var endPoint = new Dictionary<string, string> {{"db", dbName}};
+            if (precision > 0)
+                endPoint.Add("precision", precisionLiterals[(int) precision]);
+
+            if (!string.IsNullOrWhiteSpace(retention))
+                endPoint.Add("rp", retention);
+
+            _logger?.LogDebug("Function PostPointsAsync has " + points.Count() + " points.");
+            foreach (var endPointValues in endPoint)
+                _logger?.LogDebug("FormUrlEncodedContent part key: " + endPointValues.Key + " and value: " +
+                                  endPointValues.Value);
+
+            var response = await PostAsync(endPoint, Encoding.UTF8.GetBytes(line.ToString()));
+            line.Clear();
+
+            if (response.StatusCode == HttpStatusCode.Unauthorized
+                || response.StatusCode == HttpStatusCode.InternalServerError &&
+                response.ReasonPhrase == "INKApi Error"
+                || response.StatusCode == HttpStatusCode.Forbidden
+                || response.StatusCode == HttpStatusCode.BadGateway
+                || response.StatusCode == HttpStatusCode.ProxyAuthenticationRequired
+                || (int) response.StatusCode == 511) //511 NetworkAuthenticationRequired
+                throw new UnauthorizedAccessException("InfluxDB needs authentication. Check uname, pwd parameters");
+
+            if (response.StatusCode == HttpStatusCode.BadGateway ||
+                response.StatusCode == HttpStatusCode.GatewayTimeout)
+                throw new ServiceUnavailableException(await response.Content.ReadAsStringAsync());
+            //if(response.StatusCode==HttpStatusCode.NotFound)
+
+            if (response.StatusCode == HttpStatusCode.BadRequest)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                //regex assumes error text from https://github.com/influxdata/influxdb/blob/master/models/points.go ParsePointsWithPrecision
+                //fmt.Sprintf("'%s': %v", string(block[start:len(block)])
+                List<string> parts = null;
+                var l = "";
+
+                if (content.Contains("partial write"))
+                {
+                    if (content.Contains("\\n"))
+                        parts = multiLinePattern.Matches(content.Substring(content.IndexOf("partial write:\\n") + 16))
+                            .ToList();
+                    else
+                        parts = oneLinePattern.Matches(content.Substring(content.IndexOf("partial write:\\n") + 16))
+                            .ToList();
+
+                    if (parts.Count == 0)
+                        throw new InfluxDBException("Partial Write",
+                            new Regex(@"\""error\"":\""(.*?)\""").Match(content).Groups[1].Value);
+
+                    if (parts[1].Contains("\\n"))
+                        l = parts[1].Substring(0, parts[1].IndexOf("\\n")).Unescape();
+                    else
+                        l = parts[1].Unescape();
+
+                    var point = points.Where(p => p.ConvertToInfluxLineProtocol() == l).FirstOrDefault();
+                    if (point != null)
+                        throw new InfluxDBException("Partial Write", $"Partial Write : {parts?[0]} due to {parts?[2]}",
+                            point);
+                    throw new InfluxDBException("Partial Write", $"Partial Write : {parts?[0]} due to {parts?[2]}",
+                        l);
+                }
+
+                throw InfluxDBException.ProcessInfluxDBError(content);
+            }
+
+            if (response.StatusCode == HttpStatusCode.InternalServerError)
+                throw new Exception(await response.Content.ReadAsStringAsync());
+            if (response.StatusCode == HttpStatusCode.NoContent)
+                return true;
+            return false;
+        }
+
+        private static IInfluxDatapoint ToInfluxDataPoint<T>(T point)
+        {
+            if (typeof(IInfluxDatapoint).IsAssignableFrom(typeof(T))) return point as IInfluxDatapoint;
+
+            var measurementProp = typeof(T)
+                .GetProperties()
+                .Where(prop => prop.IsDefined(typeof(InfluxDBMeasurementName), true))
+                .ToList();
+            if (!measurementProp.Any())
+                throw new CustomAttributeFormatException(
+                    "InfluxDBMeasurement attribute is required on object published to InfluxDB");
+            var measurementName = measurementProp.First().GetValue(point, null) as string;
+
+            var timeProp = typeof(T)
+                .GetProperties()
+                .Where(prop => prop.IsDefined(typeof(InfluxDBTime), true))
+                .ToList();
+            var time = timeProp.Any() ? (DateTime) timeProp.First().GetValue(point, null) : DateTime.UtcNow;
+
+            var precisionProp = typeof(T)
+                .GetProperties()
+                .Where(prop => prop.IsDefined(typeof(InfluxDBPrecision), true))
+                .ToList();
+            var precision = precisionProp.Any()
+                ? (TimePrecision) precisionProp.First().GetValue(point, null)
+                : TimePrecision.Seconds;
+
+            var retentionProp = typeof(T)
+                .GetProperties()
+                .Where(prop => prop.IsDefined(typeof(InfluxDBRetentionPolicy), true))
+                .ToList();
+            var retentionPolicy = retentionProp.Any()
+                ? retentionProp.First().GetValue(point, null) is IInfluxRetentionPolicy policy
+                    ? policy
+                    : new InfluxRetentionPolicy
+                    {
+                        Name = retentionProp.First().GetValue(point, null) as string
+                    }
+                : null;
+
+            var tags = typeof(T)
+                .GetProperties()
+                .Where(prop => prop.IsDefined(typeof(InfluxDBTag), true))
+                .ToDictionary(
+                    prop => (prop.GetCustomAttributes(typeof(InfluxDBTag), true).First() as InfluxDBTag)?.Name,
+                    prop => prop.GetValue(point, null).ToString()
+                );
+
+            var fields = typeof(T)
+                .GetProperties()
+                .Where(prop => prop.IsDefined(typeof(InfluxDBField), true))
+                .ToDictionary(
+                    prop => (prop.GetCustomAttributes(typeof(InfluxDBField), true).First() as InfluxDBField)?.Name,
+                    prop => new InfluxValueField(prop.GetValue(point, null) as IComparable)
+                );
+
+            return new InfluxDatapoint<InfluxValueField>
+            {
+                Precision = precision,
+                UtcTimestamp = time,
+                MeasurementName = measurementName,
+                Retention = retentionPolicy,
+                Tags = tags,
+                Fields = fields
+            };
+        }
+
+        private static T FromInfluxDataPoint<T>(dynamic entry)
+        {
+            var instance = (T) Activator.CreateInstance(typeof(T));
+            var timeProp = typeof(T)
+                .GetProperties()
+                .Where(prop => prop.IsDefined(typeof(InfluxDBTime), true))
+                .ToList();
+            if (timeProp.Any())
+                timeProp.First().SetValue(instance, entry.Time);
+
+            var dict = (IDictionary<string, object>) entry;
+
+            foreach (var prop in typeof(T)
+                .GetProperties()
+                .Where(prop => prop.IsDefined(typeof(InfluxDBTag), true))
+                .Where(prop =>
+                    dict.ContainsKey(
+                        (prop.GetCustomAttributes(typeof(InfluxDBTag), true).First() as InfluxDBTag)?.Name ?? "")))
+            {
+                var converter = TypeDescriptor.GetConverter(prop.PropertyType);
+                var tagName = (prop.GetCustomAttributes(typeof(InfluxDBTag), true).First() as InfluxDBTag)
+                    ?.Name;
+                prop.SetValue(instance,
+                    converter.ConvertFrom(null, CultureInfo.InvariantCulture, dict[tagName ?? ""].ToString()));
+            }
+
+            foreach (var prop in typeof(T)
+                .GetProperties()
+                .Where(prop => prop.IsDefined(typeof(InfluxDBField), true))
+                .Where(prop =>
+                    dict.ContainsKey((prop.GetCustomAttributes(typeof(InfluxDBField), true).First() as InfluxDBField)
+                                     ?.Name ?? "")))
+            {
+                var converter = TypeDescriptor.GetConverter(prop.PropertyType);
+                var fieldName =
+                    (prop.GetCustomAttributes(typeof(InfluxDBField), true).First() as InfluxDBField)?.Name;
+                prop.SetValue(instance,
+                    converter.ConvertFrom(null, CultureInfo.InvariantCulture, dict[fieldName ?? ""].ToString()));
+            }
+
+            return instance;
+        }
+
+        #endregion private methods
     }
 }

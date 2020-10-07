@@ -1157,7 +1157,7 @@ namespace AdysTech.InfluxDB.Client.Net
             _logger?.LogDebug("AdysTech.InfluxDB.Client.Net.Core timeout " + _client.Timeout);
             _logger?.LogDebug("------------- HTTP Request Header ----------------");
             foreach (var httpContentHeader in headers)
-                _logger?.LogDebug("Key: " + httpContentHeader.Key + ", Value: " + string.Join(" ", httpContentHeader.Value));
+                _logger?.LogDebug("Key: " + httpContentHeader.Key + ", Value: " + string.Join(" ", httpContentHeader.Value.ToArray()));
             _logger?.LogDebug("------------- HTTP Request Header end ----------------");
         }
 
@@ -1166,7 +1166,7 @@ namespace AdysTech.InfluxDB.Client.Net
             _logger?.LogDebug("------------- HTTP Response Header ----------------");
             _logger?.LogDebug("Status code: " + response.StatusCode);
             foreach (var httpResponseHeader in response.Headers)
-                _logger?.LogDebug("Key: " + httpResponseHeader.Key + ", Value: " + string.Join(" ", httpResponseHeader.Value));
+                _logger?.LogDebug("Key: " + httpResponseHeader.Key + ", Value: " + string.Join(" ", httpResponseHeader.Value.ToArray()));
             _logger?.LogDebug("------------- HTTP Response Header end ----------------");
         }
 
